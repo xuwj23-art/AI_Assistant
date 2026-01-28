@@ -36,18 +36,23 @@
 
 ## 快速开始
 
-### 1. 环境准备
+### 1. 环境准备（使用 Anaconda）
 
 ```bash
-# 创建虚拟环境
-python -m venv .venv
+# 创建 Conda 环境
+conda create -n literature_review python=3.10 -y
 
-# 激活虚拟环境 (Windows PowerShell)
-.\.venv\Scripts\Activate.ps1
+# 安装核心包（Conda）
+conda install -n literature_review -c conda-forge hdbscan umap-learn scikit-learn numpy pandas -y
 
-# 安装依赖
-pip install -r requirements.txt
+# 激活环境
+conda activate literature_review
+
+# 安装其他包（pip）
+pip install -r requirements-conda.txt
 ```
+
+**详细安装指南：** 查看 `INSTALL_MANUAL.md` 或 `QUICKSTART.md`
 
 ### 2. Phase 1: 数据获取
 

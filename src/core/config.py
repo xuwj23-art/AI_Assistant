@@ -1,38 +1,20 @@
 """
-配置管理模块
-
-使用 pydantic-settings 从环境变量和 .env 文件加载配置。
-这是工程化项目的标准做法,便于在不同环境(开发/测试/生产)之间切换。
+项目配置文件
 """
+from pathlib import Path
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+# 项目根目录（相对于此文件）
+BASE_DIR = Path(__file__).parent.parent.parent
 
+# 数据目录
+DATA_DIR = BASE_DIR / "data"
+RAW_DATA_DIR = DATA_DIR / "raw"
+PROCESSED_DATA_DIR = DATA_DIR / "processed"
 
-class Settings(BaseSettings):
-    """应用程序全局配置"""
+# 模型目录
+MODELS_DIR = BASE_DIR / "models"
 
-    # OpenAI Configuration
-    openai_api_key: str = ""
-    openai_model: str = "gpt-3.5-turbo"
-
-    # Application Configuration
-    app_env: str = "development"
-    log_level: str = "INFO"
-
-    # ChromaDB Configuration
-    chroma_persist_dir: str = "./data/chroma"
-
-    # BERTopic Configuration
-    embedding_model: str = "all-MiniLM-L6-v2"
-    min_topic_size: int = 5
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-    )
-
-
-# 全局单例配置对象
-settings = Settings()
-
+# 确保目录存在
+RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
+PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
