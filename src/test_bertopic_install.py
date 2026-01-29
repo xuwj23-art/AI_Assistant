@@ -2,8 +2,8 @@
 """
 验证 BERTopic 环境配置
 """
-import os
-os.environ['SENTENCE_TRANSFORMERS_HOME'] = 'E:/AI_project/models/sentence_transformers'
+# import os
+# os.environ['SENTENCE_TRANSFORMERS_HOME'] = 'E:/AI_project/models/sentence_transformers'
 
 print("=" * 70)
 print("验证 BERTopic 环境")
