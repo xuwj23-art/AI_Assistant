@@ -1,0 +1,51 @@
+# Core dependencies
+arxiv==2.1.0
+pandas==2.2.0
+pydantic==2.6.0
+pydantic-settings==2.1.0
+
+# NLP & ML
+sentence-transformers==2.3.1
+bertopic==0.16.0
+umap-learn==0.5.5
+hdbscan==0.8.33
+scikit-learn==1.4.0
+
+# LLM & RAG
+langchain==0.1.6
+langchain-openai==0.0.5
+openai==1.12.0
+chromadb>=1.5.7
+pyarrow>=14.0.0
+
+# Backend
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+python-multipart==0.0.9
+
+# Frontend
+streamlit==1.31.0
+plotly==5.18.0
+matplotlib==3.8.2
+
+# Utilities
+python-dotenv==1.0.1
+httpx==0.26.0
+
+# RAG & Vector Search
+faiss-cpu>=1.7.4
+numpy>=1.21.0
+
+# PyTorch (CPU version)
+torch==2.1.2
+torchvision==0.16.2
+torchaudio==2.1.2
+
+# Transformers & Tokenizers (for AI summary)
+transformers==4.41.0
+tokenizers==0.19.1
+safetensors>=0.4.0
+
+# Additional utilities
+requests>=2.31.0
+tqdm>=4.66.0
