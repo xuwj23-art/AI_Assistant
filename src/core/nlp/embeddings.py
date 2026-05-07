@@ -29,7 +29,14 @@ class EmbeddingGenerator:
             batch_size: 批量大小
         """
         print(f"正在加载模型： {model_name}")
-        self.model = SentenceTransformer(model_name,device=device)
+        try:
+            self.model = SentenceTransformer(model_name, device=device)
+        except (NotImplementedError, RuntimeError) as e:
+            # 某些 PyTorch/SentenceTransformers 版本在 .to(device) 时会报
+            # "Cannot copy out of meta tensor" 错误，回退到不指定 device 的方式
+            print(f"[警告] 使用 device={device} 加载失败: {e}")
+            print("[警告] 回退到默认方式加载模型...")
+            self.model = SentenceTransformer(model_name)
         self.batch_size = batch_size
         self.model_name = model_name
         print(f"模型加载完成！向量维度：{self.model.get_sentence_embedding_dimension()}")

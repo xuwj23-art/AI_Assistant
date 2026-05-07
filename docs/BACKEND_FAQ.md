@@ -519,230 +519,100 @@ with open('papers.bib', 'w', encoding='utf-8') as f:
 
 ---
 
-## 5. 生产部署
+## 5. 本地部署
 
-### Q13: 如何部署到生产环境？
+> **部署策略说明**：本项目采用**本地部署**方式，在本机 conda 环境中直接运行，不使用 Docker 或服务器部署。
 
-**A:** 生产部署建议：
+### Q13: 如何在本地启动完整服务？
 
-#### 1. 使用 Gunicorn + Uvicorn
+**A:** 本地启动步骤：
 
-```bash
-# 安装 Gunicorn
-pip install gunicorn
-
-# 启动 4 个 worker 进程
-cd src
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:8000
-```
-
-**参数说明：**
-- `-w 4` - 4 个 worker 进程（建议：CPU 核心数 * 2 + 1）
-- `-k uvicorn.workers.UvicornWorker` - 使用 Uvicorn worker
-- `--bind 0.0.0.0:8000` - 监听所有网络接口的 8000 端口
-
-#### 2. 配置 CORS
-
-在 `main.py` 中限制允许的域名：
-
-```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://yourdomain.com"],  # 替换 ["*"]
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],  # 限制允许的方法
-    allow_headers=["*"],
-)
-```
-
-#### 3. 使用环境变量
-
-创建 `.env` 文件：
+#### 标准启动流程
 
 ```bash
-# .env
-DATA_PATH=/app/data/papers.csv
-MODEL_PATH=/app/models/bertopic_model
-DEBUG=false
+# 终端 1：启动后端 FastAPI 服务
+conda activate literature_review
+cd e:\AIassistant_v2\src
+python main.py
+# 后端运行在 http://127.0.0.1:8000
+
+# 终端 2：启动前端 Streamlit 界面
+conda activate literature_review
+cd e:\AIassistant_v2
+streamlit run app.py
+# 前端运行在 http://localhost:8501
+```
+
+#### 验证服务正常运行
+
+```bash
+# 检查后端健康状态
+curl http://localhost:8000/health
+# 预期: {"status": "healthy"}
+
+# 浏览器访问前端
+# http://localhost:8501
+```
+
+#### 使用环境变量配置
+
+复制 `env.example` 为 `.env` 并按需修改：
+
+```bash
+# .env（本地配置）
 LOG_LEVEL=info
+UNPAYWALL_EMAIL=your@email.com   # 可选，用于 PDF 下载
+OPENAI_API_KEY=                  # 可选，用于 LLM 主题命名
+LLM_PROVIDER=openai              # 可选：openai / qwen / ollama
 ```
 
-在代码中读取：
+在代码中读取（已在 `src/core/config.py` 中配置）：
 
 ```python
-from pydantic import BaseSettings
-
-class Settings(BaseSettings):
-    data_path: str
-    model_path: str
-    debug: bool = False
-    
-    class Config:
-        env_file = ".env"
-
-settings = Settings()
-```
-
-#### 4. 添加认证
-
-使用 API Key 保护接口：
-
-```python
-from fastapi import Security, HTTPException
-from fastapi.security.api_key import APIKeyHeader
-
-API_KEY = "your-secret-api-key"
-api_key_header = APIKeyHeader(name="X-API-Key")
-
-def verify_api_key(api_key: str = Security(api_key_header)):
-    if api_key != API_KEY:
-        raise HTTPException(status_code=403, detail="Invalid API Key")
-    return api_key
-
-@app.get("/api/topics", dependencies=[Depends(verify_api_key)])
-def get_topics():
-    ...
-```
-
-#### 5. 使用反向代理（Nginx）
-
-Nginx 配置示例：
-
-```nginx
-server {
-    listen 80;
-    server_name yourdomain.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-
-#### 6. 容器化（Docker）
-
-创建 `Dockerfile`：
-
-```dockerfile
-FROM python:3.10-slim
-
-WORKDIR /app
-
-# 安装依赖
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 复制代码
-COPY src/ ./src/
-COPY data/ ./data/
-COPY models/ ./models/
-
-# 暴露端口
-EXPOSE 8000
-
-# 启动服务
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-构建和运行：
-
-```bash
-# 构建镜像
-docker build -t literature-api .
-
-# 运行容器
-docker run -d -p 8000:8000 --name literature-api literature-api
-```
-
-使用 Docker Compose：
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  api:
-    build: .
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./data:/app/data
-      - ./models:/app/models
-    environment:
-      - LOG_LEVEL=info
+from dotenv import load_dotenv
+load_dotenv()
 ```
 
 ---
 
-### Q14: 如何监控服务健康状态？
+### Q14: 如何检查本地服务状态？
 
-**A:** 使用健康检查端点和监控工具：
+**A:** 本地服务监控方法：
 
-#### 1. 定时检查
-
-```bash
-# 每分钟检查一次（Linux/Mac）
-watch -n 60 'curl -s http://localhost:8000/health'
-
-# 或使用 cron 定时任务
-* * * * * curl -s http://localhost:8000/health || echo "Service down!" | mail -s "Alert" admin@example.com
-```
-
-#### 2. 使用 Uptime Robot
-
-免费的在线监控服务：https://uptimerobot.com/
-
-配置：
-- Monitor Type: HTTP(s)
-- URL: http://yourdomain.com/health
-- Monitoring Interval: 5 minutes
-
-#### 3. 使用 Prometheus + Grafana
-
-安装 Prometheus 客户端：
+#### 1. 健康检查端点
 
 ```bash
-pip install prometheus-fastapi-instrumentator
+# 浏览器或命令行访问
+curl http://localhost:8000/health
+# 返回: {"status": "healthy"}
+
+# PowerShell（Windows）
+Invoke-RestMethod -Uri "http://localhost:8000/health"
 ```
 
-在 `main.py` 中添加：
+#### 2. 查看终端日志
 
-```python
-from prometheus_fastapi_instrumentator import Instrumentator
+后端日志直接输出到启动终端，关键日志示例：
 
-app = FastAPI()
-Instrumentator().instrument(app).expose(app)
+```
+[TopicService] 加载了 200 篇论文数据
+[TopicService] 已加载 BERTopic 模型
+INFO: 127.0.0.1:xxxx - "GET /api/topics HTTP/1.1" 200 OK
 ```
 
-访问指标：http://localhost:8000/metrics
-
-#### 4. 日志监控
-
-使用 ELK Stack（Elasticsearch + Logstash + Kibana）：
-
-```python
-import logging
-from pythonjsonlogger import jsonlogger
-
-logHandler = logging.StreamHandler()
-formatter = jsonlogger.JsonFormatter()
-logHandler.setFormatter(formatter)
-logger = logging.getLogger()
-logger.addHandler(logHandler)
-logger.setLevel(logging.INFO)
-```
-
-#### 5. 应用性能监控（APM）
-
-使用 New Relic 或 DataDog：
+#### 3. 重启服务
 
 ```bash
-pip install newrelic
-
-# 启动时添加 agent
-NEW_RELIC_CONFIG_FILE=newrelic.ini newrelic-admin run-program uvicorn main:app
+# 在后端终端按 Ctrl+C 停止，然后重新启动
+conda activate literature_review
+cd e:\AIassistant_v2\src
+python main.py
 ```
+
+#### 4. 查看 API 文档
+
+本地 Swagger UI（服务运行时可访问）：
+- http://localhost:8000/docs
 
 ---
 

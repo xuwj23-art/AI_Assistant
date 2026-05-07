@@ -84,7 +84,7 @@ class RAGService:
 
         print(f"RAG服务初始化完成，共 {len(papers_df)} 篇论文，向量维度: {self.embeddings.shape[1]}")
         if enable_summary:
-            print("✅ AI摘要功能已启用")
+            print("[OK] AI摘要功能已启用")
 
     def summarize_paper(self, paper: PaperResponse) -> str:
         """

@@ -1,5 +1,8 @@
 # 后端 API 文档
 
+> **部署方式**：本地部署（conda 环境，不使用 Docker/服务器）
+> **后端地址**：http://127.0.0.1:8000 | **前端地址**：http://localhost:8501
+
 
 ---
 
@@ -28,14 +31,15 @@
 ```
 FastAPI 应用
     ↓
-核心服务层 (PaperService)
+核心服务层 (TopicService / ChatService / SearchService)
     ↓
-本地数据 (CSV 文件)
+本地数据 (ChromaDB + CSV + BERTopic 模型)
 ```
 
 **特点：**
--  所有数据预先下载到本地（本地预下载模式）
--  快速响应（无需联网查询）
+-  本地 conda 环境运行，无需服务器
+-  多源论文抓取（arXiv + OpenAlex）
+-  ChromaDB 向量缓存，重复搜索秒级响应
 -  类型安全（Pydantic 数据验证）
 -  自动生成 API 文档（Swagger UI）
 
@@ -50,30 +54,23 @@ FastAPI 应用
 - Git（用于克隆项目）
 - 依赖包见 `requirements.txt`
 
-### 2.2 从 GitHub 克隆项目
-
-**步骤 1：克隆仓库**
-
-```bash
-# 克隆项目到本地
-git clone https://github.com/xuwj23-art/AI_Assistant.git
-
-# 进入项目目录
-cd AI_Assistant
-```
-
-**步骤 2：查看项目结构**
+### 2.2 项目结构
 
 ```
-AI_Assistant/
+AIassistant_v2/
 ├── src/                  # 源代码
 │   ├── core/            # 核心模块
+│   │   ├── api/         # FastAPI 路由与服务
+│   │   ├── nlp/         # NLP（主题建模、趋势分析）
+│   │   ├── sources/     # 多源抓取（arXiv + OpenAlex）
+│   │   └── storage/     # ChromaDB 持久化存储
 │   ├── scripts/         # 脚本工具
 │   └── main.py          # FastAPI 主程序
+├── app.py               # Streamlit 前端
 ├── data/                # 数据目录
-│   └── raw/            # 原始论文数据
-├── models/              # 模型目录
-├── tests/               # 测试代码
+│   ├── chroma_db/       # ChromaDB 向量缓存
+│   └── processed/       # 处理后的论文数据
+├── models/              # BERTopic 模型目录
 └── requirements.txt     # 依赖列表
 ```
 
@@ -154,7 +151,10 @@ arXiv 论文抓取工具
 # 确保在 src 目录下
 cd src
 
-# 启动服务（开发模式）
+# 启动服务（推荐方式）
+python main.py
+
+# 或使用 uvicorn（开发模式，支持热重载）
 uvicorn main:app --reload
 ```
 
@@ -299,13 +299,24 @@ python -m scripts.train_topics --csv ../data/raw/arxiv_Transformer.csv --embeddi
 | `/api/topics/{id}` | GET | 获取主题详情 | ✅ 已实现 |
 | `/api/topics/{id}/papers` | GET | 获取主题下的论文 | ✅ 已实现 |
 
-### 3.4 RAG 对话端点（待实现）
+### 3.4 RAG 对话端点
 
 | 端点 | 方法 | 功能 | 状态 |
 |------|------|------|------|
-| `/api/chat/init` | POST | 初始化对话 |  待实现 |
-| `/api/chat/message` | POST | 发送消息 |  待实现 |
-| `/api/chat/history` | GET | 获取对话历史 |  待实现 |
+| `/api/chat/init` | POST | 初始化对话 | ✅ 已实现 |
+| `/api/chat/message` | POST | 发送消息 | ✅ 已实现 |
+| `/api/chat/history` | GET | 获取对话历史 | ✅ 已实现 |
+
+### 3.5 搜索端点（Stage 2/3 新增）
+
+| 端点 | 方法 | 功能 | 状态 |
+|------|------|------|------|
+| `/api/search` | POST | 多源搜索（arXiv + OpenAlex） | ✅ 已实现 |
+| `/api/search/status` | GET | 搜索状态查询 | ✅ 已实现 |
+| `/api/search/source-stats` | GET | 数据源统计 | ✅ 已实现 |
+| `/api/topics/sunburst` | GET | Sunburst 旭日图数据 | ✅ 已实现 |
+| `/api/topics/trends` | GET | 研究趋势数据 | ✅ 已实现 |
+| `/api/topics/{id}/similar` | GET | 相关主题推荐 | ✅ 已实现 |
 
 ---
 

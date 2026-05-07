@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, HttpUrl, json_schema
 
@@ -18,7 +18,6 @@ class PaperResponse(BaseModel):
     abstract: str = Field(
         ...,
         min_length=1,
-        max_length=5000,
         description="论文摘要",
     )
     published: datetime = Field(..., description="发布日期")
@@ -180,5 +179,86 @@ class TopicListResponse(BaseModel):
                         "paper_count": 38
                     }
                 ]
+            }
+        }
+
+
+# ========== Stage 3 新增模型 ==========
+
+class SunburstResponse(BaseModel):
+    """
+    Plotly Sunburst 图所需的平铺格式响应模型
+    """
+    labels: List[str] = Field(..., description="节点标签列表")
+    parents: List[str] = Field(..., description="父节点标签列表（根节点为空字符串）")
+    values: List[int] = Field(..., description="节点数值（论文数量）")
+    ids: List[str] = Field(..., description="节点唯一ID列表")
+    topic_ids: List[int] = Field(..., description="对应的主题ID（-1表示根节点）")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "labels": ["All Topics", "NLP", "Transformer", "CV"],
+                "parents": ["", "All Topics", "NLP", "All Topics"],
+                "values": [0, 80, 40, 30],
+                "ids": ["root", "topic_2", "topic_7", "topic_1"],
+                "topic_ids": [-1, 2, 7, 1]
+            }
+        }
+
+
+class TrendTopicSeries(BaseModel):
+    """单个主题的趋势时间序列"""
+    name: str = Field(..., description="主题名称")
+    counts: List[int] = Field(..., description="各年份论文数量")
+
+
+class TrendResponse(BaseModel):
+    """
+    研究趋势响应模型
+    """
+    years: List[int] = Field(..., description="年份列表")
+    topics: List[TrendTopicSeries] = Field(..., description="各主题趋势数据")
+    trending: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="增长最快的主题列表，格式: [{name, growth_rate}]"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "years": [2020, 2021, 2022, 2023],
+                "topics": [
+                    {"name": "Transformer", "counts": [10, 25, 45, 80]},
+                    {"name": "BERT/GPT", "counts": [5, 15, 30, 60]}
+                ],
+                "trending": [
+                    {"name": "Transformer", "growth_rate": 2.5},
+                    {"name": "BERT/GPT", "growth_rate": 2.1}
+                ]
+            }
+        }
+
+
+class PaperListPagedResponse(BaseModel):
+    """
+    带分页的论文列表响应模型（Stage 3 新增，支持排序）
+    """
+    topic_name: str = Field(..., description="主题名称")
+    total: int = Field(..., description="该主题下论文总数")
+    page: int = Field(..., description="当前页码（从1开始）")
+    page_size: int = Field(..., description="每页数量")
+    sort_by: str = Field(..., description="排序方式: relevance | date")
+    papers: List[PaperResponse] = Field(..., description="论文列表")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "topic_name": "transformer_attention_model",
+                "total": 40,
+                "page": 1,
+                "page_size": 20,
+                "sort_by": "date",
+                "papers": []
             }
         }

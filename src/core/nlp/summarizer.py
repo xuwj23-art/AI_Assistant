@@ -54,7 +54,7 @@ class PaperSummarizer:
         self.max_length = max_length
         self.min_length = min_length
 
-        print(f"✅ 摘要模型加载完成！")
+        print(f"[OK] 摘要模型加载完成！")
 
     def summarize(
             self,
@@ -136,7 +136,7 @@ class LightweightSummarizer:
         self.tokenizer = T5Tokenizer.from_pretrained(model_name)
         self.model = T5ForConditionalGeneration.from_pretrained(model_name)
 
-        print(f"✅ 轻量级摘要模型加载完成！")
+        print(f"[OK] 轻量级摘要模型加载完成！")
 
     def summarize(self, text: str, max_length: int = 150) -> str:
         """

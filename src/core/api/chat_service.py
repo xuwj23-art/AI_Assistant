@@ -81,37 +81,52 @@ class ChatService:
 _chat_service: Optional[ChatService] = None
 
 
+def reset_chat_service():
+    """重置对话服务（数据更新后调用，下次请求时重新初始化）"""
+    global _chat_service
+    _chat_service = None
+    print("[ChatService] 已重置，下次请求时将重新加载数据")
+
+
 def get_chat_service() -> ChatService:
-    """获取对话服务实例"""
+    """
+    获取对话服务实例（延迟初始化）
+
+    如果没有数据，返回 HTTP 503 提示用户先搜索。
+    数据由 /api/search 端点触发抓取后自动可用。
+    """
     global _chat_service
 
     if _chat_service is None:
-        # 直接使用 arxiv_Transformer.csv
-        csv_path = RAW_DATA_DIR / "arxiv_Transformer.csv"
+        # 使用 auto_fetch 查找最新数据
+        from ..auto_fetch import get_latest_data_paths
+        paths = get_latest_data_paths()
 
+        if paths is None:
+            raise FileNotFoundError(
+                "尚无论文数据。请先在搜索框中输入关键词进行搜索。"
+            )
+
+        csv_path = paths["csv"]
         if not csv_path.exists():
-            # 如果找不到，尝试查找其他CSV文件
-            csv_files = list(RAW_DATA_DIR.glob("arxiv_*.csv"))
-            if not csv_files:
-                raise FileNotFoundError(
-                    f"没有找到论文数据，请先运行 fetch_and_save_arxiv\n"
-                    f"期待的文件: {csv_path}\n"
-                    f"或者运行: python -m scripts.fetch_and_save_arxiv --query transformer --max-results 50"
-                )
-            csv_path = max(csv_files, key=lambda p: p.stat().st_mtime)
+            raise FileNotFoundError(
+                "尚无论文数据。请先在搜索框中输入关键词进行搜索。"
+            )
 
         print(f"使用论文文件: {csv_path}")
 
         # 查找向量文件
-        embeddings_path = PROCESSED_DATA_DIR / "embeddings.npy"
-        if not embeddings_path.exists():
-            print("=" * 50)
-            print("警告：未找到向量文件")
-            print(f"期待路径: {embeddings_path}")
-            print("将在初始化时生成向量（可能需要几分钟）")
-            print("建议先运行: python -m scripts.generate_embeddings")
-            print("=" * 50)
+        embeddings_path = paths.get("embeddings")
+        if embeddings_path and not embeddings_path.exists():
             embeddings_path = None
+
+        if embeddings_path is None:
+            # 回退查找标准路径
+            std_emb = PROCESSED_DATA_DIR / "embeddings.npy"
+            if std_emb.exists():
+                embeddings_path = std_emb
+            else:
+                print("警告：未找到向量文件，将在初始化时生成")
 
         # 加载数据
         print(f"加载论文数据: {csv_path}")
@@ -123,11 +138,11 @@ def get_chat_service() -> ChatService:
         rag_service = RAGService(
             papers_df=df,
             embeddings_path=embeddings_path,
-            enable_summary = True,
-            summary_model = "light"
+            enable_summary=True,
+            summary_model="light"
         )
 
         _chat_service = ChatService(rag_service)
-        print("✅ 对话服务初始化成功！")
+        print("[OK] 对话服务初始化成功！")
 
     return _chat_service

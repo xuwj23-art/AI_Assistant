@@ -64,27 +64,32 @@ class TopicModeler:
         # 嵌入模型：
         self.embedding_model = SentenceTransformer(embedding_model)
 
-        # UMAP降维:
+        # UMAP降维（n_neighbors 不能超过样本数，动态调整）
+        effective_n_neighbors = min(n_neighbors, max(2, min_topic_size))
+        effective_n_components = min(n_components, max(2, min_topic_size - 1))
         self.umap_model = UMAP(
-            n_components=5,      # 降到 5 维
-            n_neighbors=15,      # 考虑 15 个邻居
+            n_components=effective_n_components,
+            n_neighbors=effective_n_neighbors,
             min_dist=0.0,        # 最小距离
             metric='cosine'      # 使用余弦距离
         )
 
-        # HDBSCAN 聚类
+        # HDBSCAN 聚类（min_cluster_size 和 min_samples 根据 min_topic_size 调整）
+        effective_min_samples = min(5, max(1, min_topic_size // 2))
         self.hdbscan_model = HDBSCAN(
-            min_cluster_size=10,     # 最小簇大小
-            min_samples=5,           # 最小样本数
+            min_cluster_size=min_topic_size,
+            min_samples=effective_min_samples,
             metric='euclidean',      # 距离度量
             cluster_selection_method='eom'  # 簇选择方法
         )
 
         # 词频统计/向量化器
+        # min_df 根据 min_topic_size 动态调整，避免论文数量少时报错
+        effective_min_df = min(2, max(1, min_topic_size // 3))
         self.vectorizer_model = CountVectorizer(
             stop_words="english" if language == "english" else None,
             ngram_range=(1,2),# 1-2个词的短语,例如"Machine Learning"
-            min_df = 2 # 至少出现两次
+            min_df=effective_min_df
         )
 
         # BERTopic 模型

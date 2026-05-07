@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.api.routes import router as paper_router
 from core.api.topic_routes import router as topic_router
 from core.api.rag_routes import router as rag_router
+from core.api.search_routes import router as search_router
 
 # 创建应用
 app = FastAPI(
@@ -43,6 +44,7 @@ app.add_middleware(
 )
 
 # 注册路由
+app.include_router(search_router)   # 搜索入口（必须在前面）
 app.include_router(paper_router)
 app.include_router(topic_router)
 app.include_router(rag_router)
@@ -56,9 +58,9 @@ def read_root():
         "version": "1.0.0",
         "docs": "/docs",
         "endpoints": {
+            "search": "/api/search",
+            "search_status": "/api/search/status",
             "papers": "/api/papers",
-            "search": "/api/papers/search",
-            "stats": "/api/stats",
             "topics": "/api/topics",
             "chat": "/api/chat"
         }
