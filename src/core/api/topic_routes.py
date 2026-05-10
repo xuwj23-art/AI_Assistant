@@ -60,7 +60,7 @@ def get_topic_service() -> TopicService:
             from fastapi import HTTPException
             raise HTTPException(
                 status_code=503,
-                detail="尚无主题数据。请先在搜索框中输入关键词进行搜索。"
+                detail="No topic data yet. Please search for a keyword first."
             )
 
         data_path = paths["topics_csv"]
@@ -68,7 +68,7 @@ def get_topic_service() -> TopicService:
             from fastapi import HTTPException
             raise HTTPException(
                 status_code=503,
-                detail="尚无主题数据。请先在搜索框中输入关键词进行搜索。"
+                detail="No topic data yet. Please search for a keyword first."
             )
 
         # 模型路径
@@ -101,7 +101,7 @@ def get_topics(
         topics = service.get_all_topics()
         return TopicListResponse(total=len(topics), topics=topics)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取主题列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve topic list: {str(e)}")
 
 
 @router.get(
@@ -116,7 +116,7 @@ def get_topic_stats(
     try:
         return service.get_stats()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve statistics: {str(e)}")
 
 
 # ========== Stage 3 新增端点 ==========
@@ -134,18 +134,102 @@ def get_sunburst_data(
     service: TopicService = Depends(get_topic_service)
 ):
     """
-    获取 Plotly Sunburst 旭日图数据
+    获取 Plotly Sunburst 旭日图数据（多级层级版）
 
-    返回格式（Plotly 直接使用）:
-    {
-      "labels":    ["All Topics", "NLP",        "Transformer", "CV",         ...],
-      "parents":   ["",           "All Topics", "NLP",         "All Topics", ...],
-      "values":    [0,            80,           40,            30,           ...],
-      "ids":       ["root",       "topic_2",    "topic_7",     "topic_1",    ...],
-      "topic_ids": [-1,           2,            7,             1,            ...]
-    }
+    优先策略:
+      从 data/processed/arxiv_<query>_hierarchy.json 读取预计算的多级层级树
+      （由 run_pipeline 在训练 BERTopic 后自动生成）。
+
+    回退策略:
+      如果层级 JSON 不存在（旧数据或计算失败），退化为 2 层平铺结构。
+
+    返回格式（Plotly Sunburst 直接使用）:
+      labels/parents/values/ids/topic_ids 平铺列表
+      topic_ids: -1=根节点, -2=内部聚类节点, >=0=叶子主题
     """
     try:
+        # ── 优先：读取预计算的层级 JSON ──────────────────────────
+        import json as _json
+        from ..auto_fetch import get_latest_data_paths
+
+        hier_data = None
+        paths = get_latest_data_paths()
+        hier_path = paths.get("hierarchy") if paths else None
+        if hier_path and hier_path.exists():
+            try:
+                with open(hier_path, "r", encoding="utf-8") as _f:
+                    hier_data = _json.load(_f)
+                # 基本校验：标签数量 + values 约束（parent >= sum of children）
+                if not (hier_data.get("labels") and len(hier_data["labels"]) > 1):
+                    hier_data = None
+                else:
+                    _ids_set = set(hier_data["ids"])
+                    _parent_bad = any(
+                        p != "" and p not in _ids_set
+                        for p in hier_data["parents"]
+                    )
+                    from collections import defaultdict as _dd
+                    _child_sum: dict = _dd(int)
+                    for p, v in zip(hier_data["parents"], hier_data["values"]):
+                        if p:
+                            _child_sum[p] += v
+                    _val_bad = any(
+                        v < _child_sum.get(nid, 0)
+                        for nid, v in zip(hier_data["ids"], hier_data["values"])
+                    )
+                    if _parent_bad or _val_bad:
+                        print(f"[Sunburst] 层级 JSON 校验失败（parent_bad={_parent_bad}, val_bad={_val_bad}），尝试重算")
+                        hier_data = None
+                        if hier_path:
+                            try:
+                                hier_path.unlink()
+                            except Exception:
+                                pass
+            except Exception as _e:
+                print(f"[Sunburst] 层级 JSON 读取失败（{_e}），回退 2 层")
+                hier_data = None
+
+        # 若 JSON 缺失或失效，尝试从当前 BERTopic 模型重新计算
+        if hier_data is None:
+            try:
+                _model = service._load_model()
+                # 历史切换时 service.model_path=None；退而使用磁盘上保存的最新模型
+                if _model is None:
+                    from ..auto_fetch import MODELS_DIR
+                    _default_model_path = MODELS_DIR / "bertopic_model"
+                    if _default_model_path.exists():
+                        from core.nlp.topic_modeling import TopicModeler
+                        _model = TopicModeler.load_model(_default_model_path, verbose=False)
+                _df = service._load_data()
+                if _model is not None and _df is not None:
+                    from ..auto_fetch import _compute_hierarchy_sunburst, PROCESSED_DATA_DIR
+                    import re as _re
+                    csv_path = paths.get("topics_csv") if paths else None
+                    safe_q = ""
+                    if csv_path:
+                        m = _re.search(r"arxiv_(.+)_with_topics", str(csv_path))
+                        safe_q = m.group(1) if m else ""
+                    labels_map = {t.topic_id: (t.topic_label or t.topic_name) for t in service.get_all_topics()}
+                    hier_data = _compute_hierarchy_sunburst(_model, _df, labels_map)
+                    if safe_q:
+                        _out = PROCESSED_DATA_DIR / f"arxiv_{safe_q}_hierarchy.json"
+                        with open(_out, "w", encoding="utf-8") as _f:
+                            _json.dump(hier_data, _f, ensure_ascii=False)
+                        print(f"[Sunburst] 重算完成，已保存至 {_out.name}")
+            except Exception as _e2:
+                print(f"[Sunburst] 重算失败（{_e2}），回退 2 层")
+                hier_data = None
+
+        if hier_data:
+            return SunburstResponse(
+                labels=hier_data["labels"],
+                parents=hier_data["parents"],
+                values=hier_data["values"],
+                ids=hier_data["ids"],
+                topic_ids=hier_data["topic_ids"],
+            )
+
+        # ── 回退：2 层平铺结构 ────────────────────────────────────
         topics = service.get_all_topics()
 
         if not topics:
@@ -164,16 +248,14 @@ def get_sunburst_data(
         child_values = []
 
         for topic in topics:
-            node_id = f"topic_{topic.topic_id}"
-            labels.append(f"Topic {topic.topic_id}: {topic.topic_name}")
-            parents.append("All Topics")
+            display_name = topic.topic_label or topic.topic_name
+            labels.append(f"Topic {topic.topic_id}: {display_name}")
+            parents.append("root")
             child_values.append(topic.paper_count)
-            ids.append(node_id)
+            ids.append(f"topic_{topic.topic_id}")
             topic_ids.append(topic.topic_id)
 
-        # 根节点 value = 子节点之和（branchvalues="total" 要求）
         values = [sum(child_values)] + child_values
-
         return SunburstResponse(
             labels=labels,
             parents=parents,
@@ -183,7 +265,7 @@ def get_sunburst_data(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生成 Sunburst 数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate topic data: {str(e)}")
 
 
 @router.get(
@@ -253,7 +335,7 @@ def get_trends(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取趋势数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve trend data: {str(e)}")
 
 
 # ========== 主题详情端点 ==========
@@ -326,11 +408,18 @@ def get_topic_papers(
 
     # 排序
     if sort_by == "date":
-        all_papers = sorted(
-            all_papers,
-            key=lambda p: p.published if p.published else __import__("datetime").datetime.min,
-            reverse=True
-        )
+        from datetime import datetime as _dt
+
+        def _date_key(p):
+            # 统一转为 timezone-naive，避免 aware vs. naive 比较异常
+            if p.published is None:
+                return _dt.min
+            try:
+                return p.published.replace(tzinfo=None)
+            except Exception:
+                return _dt.min
+
+        all_papers = sorted(all_papers, key=_date_key, reverse=True)
     # sort_by == "relevance" 保持原始顺序
 
     # 分页
@@ -352,7 +441,10 @@ def get_topic_papers(
 @router.get(
     "/topics/{topic_id}/similar",
     summary="获取相关主题推荐",
-    description="基于主题关键词相似度，推荐与当前主题最相关的其他主题",
+    description=(
+        "基于主题向量质心的余弦相似度推荐相关主题；"
+        "若向量不可用，回退到 Jaccard 关键词相似度。"
+    ),
     responses={
         404: {"model": ErrorResponse, "description": "主题不存在"}
     }
@@ -365,9 +457,9 @@ def get_similar_topics(
     """
     获取相关主题推荐
 
-    基于主题关键词的词汇重叠度计算相似性（轻量级方案，无需向量计算）。
+    优先策略: 主题向量质心 + 余弦相似度（语义层面的"相关"）
+    回退策略: 关键词 Jaccard 重叠（数据/向量缺失时）
     """
-    # 检查目标主题是否存在
     target_topic = service.get_topic_by_id(topic_id)
     if target_topic is None:
         raise HTTPException(
@@ -377,38 +469,68 @@ def get_similar_topics(
 
     try:
         all_topics = service.get_all_topics()
+        topic_meta = {t.topic_id: t for t in all_topics}
 
-        # 目标主题的关键词集合
-        target_words = {kw.word.lower() for kw in target_topic.keywords}
+        # ===== 优先：余弦相似度 =====
+        method = "cosine"
+        similar: list[dict] = []
+        try:
+            from ..auto_fetch import get_latest_data_paths
+            from ..nlp.topic_similarity import get_topic_centroids, cosine_similar_topics
 
-        similar = []
-        for t in all_topics:
-            if t.topic_id == topic_id:
-                continue
-            t_words = {kw.word.lower() for kw in t.keywords}
-            # Jaccard 相似度
-            if not target_words and not t_words:
-                score = 0.0
-            else:
-                intersection = len(target_words & t_words)
-                union = len(target_words | t_words)
-                score = intersection / union if union > 0 else 0.0
+            paths = get_latest_data_paths()
+            if paths:
+                csv_path = paths.get("topics_csv")
+                emb_path = paths.get("embeddings")
+                centroids = (
+                    get_topic_centroids(csv_path, emb_path)
+                    if (csv_path and emb_path) else {}
+                )
+                if centroids and topic_id in centroids:
+                    cosine_pairs = cosine_similar_topics(topic_id, centroids, top_n=top_n)
+                    for tid, score in cosine_pairs:
+                        meta = topic_meta.get(tid)
+                        if meta is None:
+                            continue
+                        similar.append({
+                            "topic_id": tid,
+                            "topic_name": meta.topic_label or meta.topic_name,
+                            "paper_count": meta.paper_count,
+                            "similarity": round(float(score), 4),
+                        })
+        except Exception as e:
+            print(f"[similar] 余弦计算失败，回退 Jaccard: {e}")
+            similar = []
 
-            similar.append({
-                "topic_id": t.topic_id,
-                "topic_name": t.topic_name,
-                "paper_count": t.paper_count,
-                "similarity": round(score, 4)
-            })
-
-        # 按相似度降序
-        similar.sort(key=lambda x: x["similarity"], reverse=True)
+        # ===== 回退：Jaccard =====
+        if not similar:
+            method = "jaccard"
+            target_words = {kw.word.lower() for kw in target_topic.keywords}
+            for t in all_topics:
+                if t.topic_id == topic_id:
+                    continue
+                t_words = {kw.word.lower() for kw in t.keywords}
+                if not target_words and not t_words:
+                    score = 0.0
+                else:
+                    inter = len(target_words & t_words)
+                    union = len(target_words | t_words)
+                    score = inter / union if union > 0 else 0.0
+                similar.append({
+                    "topic_id": t.topic_id,
+                    "topic_name": t.topic_label or t.topic_name,
+                    "paper_count": t.paper_count,
+                    "similarity": round(score, 4),
+                })
+            similar.sort(key=lambda x: x["similarity"], reverse=True)
+            similar = similar[:top_n]
 
         return {
             "topic_id": topic_id,
-            "topic_name": target_topic.topic_name,
-            "similar_topics": similar[:top_n]
+            "topic_name": target_topic.topic_label or target_topic.topic_name,
+            "method": method,
+            "similar_topics": similar,
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取相关主题失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve related topics: {str(e)}")

@@ -4,6 +4,7 @@ API 路由
 定义所有 API 端点
 """
 from fastapi import APIRouter, HTTPException, Query, Path, Depends
+from fastapi.responses import FileResponse, RedirectResponse
 from typing import List
 from .models import PaperResponse, PaperListResponse, SearchRequest, ErrorResponse
 from .services import PaperService
@@ -118,6 +119,54 @@ def get_paper(
         )
     
     return paper
+
+
+@router.get(
+    "/papers/{paper_id}/pdf",
+    summary="下载论文 PDF",
+    description=(
+        "下载指定论文的 PDF 文件。\n\n"
+        "- `mode=download`（默认）：服务器端代理下载并缓存到本地，再以附件形式返回\n"
+        "- `mode=redirect`：直接 302 跳转到原始 PDF URL（适合不想代理的场景）\n"
+    ),
+    responses={
+        404: {"model": ErrorResponse, "description": "论文或 PDF 链接不存在"},
+        502: {"model": ErrorResponse, "description": "下载源失败"},
+    },
+)
+def download_paper_pdf(
+    paper_id: str = Path(..., description="论文 ID（arxiv_id / openalex_id / 完整 id）"),
+    mode: str = Query("download", regex="^(download|redirect)$"),
+):
+    """
+    下载论文 PDF。
+    """
+    from ..downloader import get_pdf_downloader
+    downloader = get_pdf_downloader()
+
+    pdf_url, _row = downloader.resolve_pdf_url(paper_id)
+    if not pdf_url:
+        raise HTTPException(
+            status_code=404,
+            detail=f"未找到论文 {paper_id} 或其 PDF 链接"
+        )
+
+    if mode == "redirect":
+        return RedirectResponse(url=pdf_url, status_code=302)
+
+    local_path, _ = downloader.download(paper_id)
+    if local_path is None or not local_path.exists():
+        raise HTTPException(
+            status_code=502,
+            detail=f"PDF 下载失败（URL: {pdf_url}）"
+        )
+
+    safe_name = (paper_id.replace('/', '_')[:60] or "paper") + ".pdf"
+    return FileResponse(
+        path=str(local_path),
+        media_type="application/pdf",
+        filename=safe_name,
+    )
 
 
 @router.get(

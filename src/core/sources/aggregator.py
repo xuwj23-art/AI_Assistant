@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional
 import re
 from .base import Paper, PaperSource
 
@@ -40,31 +40,38 @@ class MultiSourceAggregator:
         query: str,
         max_results: int = 200,
         oversample_ratio: float = 1.5,
-        min_tolerance: float = 0.9
+        min_tolerance: float = 0.9,
+        weights: Optional[Dict[str, float]] = None,
     ) -> List[Paper]:
         """
         多源并行搜索 + 去重
-        
+
         参数:
             query: 搜索关键词
             max_results: 目标论文数量
             oversample_ratio: 过采样倍数（应对去重损失，默认 1.5）
             min_tolerance: 最小容忍度（0.9 = 至少达到 90% 目标数量）
-        
+            weights: 各数据源抓取权重 {"arxiv": 0.7, "openalex": 0.3}
+                若为 None，则各源平均分配（保持原有行为）
+
         返回:
             去重后的 Paper 列表（最多 max_results 篇）
         """
         target = max_results
-        per_source = int(target * oversample_ratio)
-        
+        total_budget = int(target * oversample_ratio)
+        # 给每个 source 分配本轮请求数量
+        per_source_map = self._allocate_budget(total_budget, weights)
+
         print(f"\n{'='*60}")
         print(f"[多源抓取] 目标: {target} 篇论文")
         print(f"[多源抓取] 数据源: {[s.get_source_name() for s in self.sources]}")
-        print(f"[多源抓取] 每源请求: {per_source} 篇（过采样倍数 {oversample_ratio}）")
+        if weights:
+            print(f"[多源抓取] 智能权重: {weights}")
+        print(f"[多源抓取] 各源请求: {per_source_map}（过采样倍数 {oversample_ratio}）")
         print(f"{'='*60}\n")
-        
-        # 第一轮：并行抓取
-        all_papers = self._fetch_parallel(query, per_source)
+
+        # 第一轮：并行抓取（按权重分配每源数量）
+        all_papers = self._fetch_parallel(query, per_source_map)
         
         print(f"\n[去重前] 总计: {len(all_papers)} 篇")
         
@@ -89,39 +96,80 @@ class MultiSourceAggregator:
         
         return result
     
-    def _fetch_parallel(self, query: str, per_source: int) -> List[Paper]:
+    def _allocate_budget(
+        self,
+        total_budget: int,
+        weights: Optional[Dict[str, float]],
+    ) -> Dict[str, int]:
+        """
+        按权重把总抓取预算分配给各数据源。
+
+        - weights=None 或对应源缺失：均分
+        - 任一源最少分到 1 篇，避免被完全跳过（用户已勾选则尊重）
+        """
+        n = len(self.sources)
+        if n == 0:
+            return {}
+
+        # 默认均分
+        if not weights:
+            base = max(1, total_budget // n)
+            return {s.get_source_name(): base for s in self.sources}
+
+        # 按权重分配
+        allocation: Dict[str, int] = {}
+        used = 0
+        for src in self.sources:
+            name = src.get_source_name()
+            w = weights.get(name, 1.0 / n)
+            quota = max(1, int(round(total_budget * w)))
+            allocation[name] = quota
+            used += quota
+
+        # 微调：避免明显超额（最大源吸收差额）
+        if used > total_budget * 1.2 and allocation:
+            # 等比缩放
+            scale = (total_budget * 1.1) / used
+            allocation = {k: max(1, int(v * scale)) for k, v in allocation.items()}
+        return allocation
+
+    def _fetch_parallel(
+        self,
+        query: str,
+        per_source_map: Dict[str, int],
+    ) -> List[Paper]:
         """
         并行抓取所有数据源
-        
+
         参数:
             query: 搜索关键词
-            per_source: 每个源的请求数量
-        
+            per_source_map: 每个源的请求数量 {"arxiv": 60, "openalex": 30}
+
         返回:
             所有数据源的论文合集
         """
         all_papers = []
-        
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 提交所有任务
             future_to_source = {
-                executor.submit(source.search, query, per_source): source
+                executor.submit(
+                    source.search,
+                    query,
+                    per_source_map.get(source.get_source_name(), 50),
+                ): source
                 for source in self.sources
             }
-            
-            # 收集结果
+
             for future in as_completed(future_to_source):
                 source = future_to_source[future]
                 source_name = source.get_source_name()
-                
                 try:
                     papers = future.result(timeout=120)
                     print(f"  [OK] {source_name:15s}: {len(papers):3d} 篇")
                     all_papers.extend(papers)
-                
                 except Exception as e:
                     print(f"  [FAIL] {source_name:15s}: 失败 - {e}")
-        
+
         return all_papers
     
     def _deduplicate(self, papers: List[Paper]) -> List[Paper]:

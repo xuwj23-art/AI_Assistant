@@ -50,6 +50,7 @@ class ChatMessageResponse(BaseModel):
     sources: List[SourceInfo] = Field(..., description="参考来源")
     question: str = Field(..., description="原始问题")
     summary_enabled: bool = Field(False, description="是否启用AI摘要")
+    model_used: str = Field("local", description="生成回答的模型: deepseek | local | none")
 
 
 class HistoryItem(BaseModel):
@@ -123,15 +124,8 @@ def send_message(
     返回:
         - 回答内容和参考来源
     """
-    # 检查会话是否存在
-    session_info = service.get_session_info(request.session_id)
-    if session_info is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Session not found: {request.session_id}"
-        )
-
-    # 发送消息
+    # 不再 404：ChatService.send_message 内置 session 自愈逻辑
+    # （热重载或服务重置导致 sessions dict 被清时，自动用传入 id 重建）
     result = service.send_message(
         session_id=request.session_id,
         message=request.message
@@ -176,6 +170,59 @@ def get_history(
     return result
 
 
+@router.delete(
+    "/history",
+    summary="清空对话历史",
+    description="清空指定会话的所有历史消息",
+    responses={
+        404: {"model": ErrorResponse, "description": "会话不存在"}
+    }
+)
+def clear_history(
+        session_id: str = Query(..., description="会话ID"),
+        service: ChatService = Depends(get_chat_service)
+):
+    """清空对话历史（保留 session_id，重置 message_count）"""
+    session_info = service.get_session_info(session_id)
+    if session_info is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session not found: {session_id}"
+        )
+    ok = service.clear_history(session_id)
+    return {
+        "session_id": session_id,
+        "cleared": ok,
+        "message": "History cleared" if ok else "No history to clear",
+    }
+
+
+@router.get(
+    "/llm-status",
+    summary="LLM 状态",
+    description="返回 RAG 当前可用的 LLM（DeepSeek / 本地）",
+)
+def llm_status():
+    """返回 LLM 可用性，供前端显示模型徽章"""
+    try:
+        from ..llm.provider import get_llm_provider
+        provider = get_llm_provider()
+        info = provider.describe()
+        # RAG 关心的是 DeepSeek，但顺便返回 Gemini 信息便于调试
+        return {
+            "rag_provider": "deepseek" if info["deepseek"]["available"] else "local",
+            "rag_model": info["deepseek"]["model"] if info["deepseek"]["available"] else "t5-small",
+            "deepseek": info["deepseek"],
+            "gemini": info["gemini"],
+        }
+    except Exception as exc:
+        return {
+            "rag_provider": "local",
+            "rag_model": "t5-small",
+            "error": str(exc),
+        }
+
+
 @router.get(
     "/sessions/{session_id}",
     response_model=ChatInitResponse,
@@ -209,5 +256,5 @@ def get_session(
         "session_id": session_info["session_id"],
         "topic_id": session_info.get("topic_id"),
         "topic_name": None,  # 可以从topic_service获取
-        "message": f"会话已存在，共有 {session_info['message_count']} 条消息"
+        "message": f"Session exists with {session_info['message_count']} message(s)"
     }

@@ -2,6 +2,7 @@ import pandas as pd
 from pathlib import Path
 from typing import List, Optional
 from .models import PaperResponse
+from .paper_utils import row_to_paper
 
 class PaperService:
     """
@@ -24,84 +25,8 @@ class PaperService:
         return self._df
     
     def _row_to_paper(self, row: pd.Series) -> PaperResponse:
-        """
-        将DataFrame 转换为 PaperResponse
-
-        参数:
-            row: DataFrame的一行
-        返回:
-            PaperResponse 对象
-        """
-        # 处理作者列表
-        authors = row.get('authors', '[]') # []代表默认值,如果authors列不存在
-        if isinstance(authors, str):
-            # 如果是字符串，尝试解析
-            import ast
-            try:
-                authors = ast.literal_eval(authors)
-            except:
-                authors = [authors]
-
-        # 将str类型的数据转化为需要的List[str]
-        categories = row.get('categories', '[]')
-        if isinstance(categories, str):
-            # 如果是字符串，尝试解析
-            import ast
-            try:
-                categories = ast.literal_eval(categories)
-            except:
-                categories = [categories]  
-
-        # 处理 ID：从 URL 中提取 arXiv ID
-        id_val = row.get('id', '')
-        if pd.isna(id_val):
-            id_val = ''
-        else:
-            id_val = str(id_val)
-            # 如果是完整URL，提取ID部分
-            if 'arxiv.org/abs/' in id_val:
-                id_val = id_val.split('arxiv.org/abs/')[-1]
-                # 去掉版本号（如 v1）
-                if 'v' in id_val:
-                    id_val = id_val.split('v')[0]
-
-        # 处理 PDF URL：如果为空，从 url 列生成
-        pdf_url = row.get('pdf_url')
-        if pd.isna(pdf_url) or pdf_url == '' or str(pdf_url).strip() == '':
-            # 尝试从 url 列生成 PDF URL
-            url = row.get('url', '')
-            if url and 'arxiv.org/abs/' in str(url):
-                # 将 abs 替换为 pdf，并添加 .pdf 后缀
-                pdf_url = str(url).replace('/abs/', '/pdf/') + '.pdf'
-            else:
-                pdf_url = None
-        else:
-            pdf_url = str(pdf_url).strip()
-
-        # 必填 str 字段：空值转成 ""，避免 str(NaN) 得到 "nan"（不能转 None，模型要求必填）
-        title_val = row.get('title', '')
-        abstract_val = row.get('abstract', '')
-        if pd.isna(title_val):
-            title_val = ''
-        if pd.isna(abstract_val):
-            abstract_val = ''
-
-        # 处理日期：pandas 自动解析为 Timestamp，直接使用
-        published_val = row.get('published')
-        if pd.isna(published_val):
-            # 如果日期缺失，使用默认值
-            from datetime import datetime
-            published_val = datetime(2000, 1, 1)
-
-        return PaperResponse(
-            id=str(id_val),
-            title=str(title_val),
-            authors=authors if isinstance(authors, list) else [],
-            abstract=str(abstract_val),
-            published=published_val,
-            pdf_url=pdf_url,
-            categories=categories if isinstance(categories, list) else []
-        ) 
+        """将 DataFrame 行转换为 PaperResponse（委托给公共工具）。"""
+        return row_to_paper(row)
     def get_all_papers(self, limit: int = 100) -> List[PaperResponse]:
         """
         获取所有论文

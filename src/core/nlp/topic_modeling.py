@@ -65,22 +65,27 @@ class TopicModeler:
         self.embedding_model = SentenceTransformer(embedding_model)
 
         # UMAP降维（n_neighbors 不能超过样本数，动态调整）
+        # random_state=42 确保相同输入得到相同主题数（避免每次运行结果跳动）
         effective_n_neighbors = min(n_neighbors, max(2, min_topic_size))
         effective_n_components = min(n_components, max(2, min_topic_size - 1))
         self.umap_model = UMAP(
             n_components=effective_n_components,
             n_neighbors=effective_n_neighbors,
             min_dist=0.0,        # 最小距离
-            metric='cosine'      # 使用余弦距离
+            metric='cosine',     # 使用余弦距离
+            random_state=42,     # 固定种子，保证可复现性
         )
 
-        # HDBSCAN 聚类（min_cluster_size 和 min_samples 根据 min_topic_size 调整）
-        effective_min_samples = min(5, max(1, min_topic_size // 2))
+        # HDBSCAN 聚类
+        # min_samples=2: 让 HDBSCAN 对密度变化更敏感，能找到更多子簇
+        #                （窄域数据如"全是 BERT 论文"时尤其重要）
+        # cluster_selection_method='leaf': 取 condensed tree 的叶节点作为簇，
+        #                典型给出比 'eom' 多 2-3 倍的主题数，更适合同质化语料
         self.hdbscan_model = HDBSCAN(
             min_cluster_size=min_topic_size,
-            min_samples=effective_min_samples,
-            metric='euclidean',      # 距离度量
-            cluster_selection_method='eom'  # 簇选择方法
+            min_samples=2,
+            metric='euclidean',
+            cluster_selection_method='leaf',
         )
 
         # 词频统计/向量化器
@@ -168,7 +173,7 @@ class TopicModeler:
         self,
         topic_id: int,
         top_n: int = 10
-    ) -> List[Tuple(str,float)]:
+    ) -> List[Tuple[str, float]]:
         """
         获取主题的关键词
         fit()函数运行结束后,BERTopic 已经在内部把几千篇论文分好了类，

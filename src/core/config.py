@@ -1,22 +1,22 @@
 """
-项目配置文件
+Project configuration — path constants for data and model directories.
 """
 from pathlib import Path
 
-# 项目根目录（相对于此文件）
+# Project root (two levels up from this file: src/core/config.py → root)
 BASE_DIR = Path(__file__).parent.parent.parent
 
-# 数据目录
+# Data directories
 DATA_DIR = BASE_DIR / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
-CHROMA_DB_DIR = DATA_DIR / "chroma_db"  # ChromaDB 持久化目录
+PDFS_DIR = DATA_DIR / "pdfs"
 
-# 模型目录
+# Model directory
 MODELS_DIR = BASE_DIR / "models"
 
-# 确保目录存在
+# Ensure directories exist on import
 RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
 PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
-CHROMA_DB_DIR.mkdir(parents=True, exist_ok=True)
+PDFS_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)

@@ -24,6 +24,10 @@ class PaperResponse(BaseModel):
     authors: List[str] = Field(..., description="作者列表")
     pdf_url: Optional[HttpUrl] = Field(None, description="PDF 下载链接")
     categories: List[str] = Field(default_factory=list, description="论文分类")
+    relevance: Optional[float] = Field(
+        None,
+        description="主题代表性分数（0~1）：论文向量到所在主题质心的余弦相似度，越高越能代表该主题",
+    )
 
     class Config:
         json_schema_extra = {
@@ -129,7 +133,11 @@ class TopicResponse(BaseModel):
     主题响应模型
     """
     topic_id: int = Field(..., description="主题ID")
-    topic_name: str = Field(..., description="主题名称")
+    topic_name: str = Field(..., description="主题名称（关键词拼接，向后兼容）")
+    topic_label: Optional[str] = Field(
+        None,
+        description="LLM 生成的可读主题标题（如 'Large Language Models for Generation'）",
+    )
     keywords: List[TopicKeyword] = Field(..., description="关键词列表")
     paper_count: int = Field(..., ge=0, description="论文数量")
 

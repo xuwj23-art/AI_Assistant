@@ -1,10 +1,10 @@
 """
-Streamlit 前端界面 — 搜索驱动版
+Streamlit frontend — search-driven version
 
-交互流程:
-  1. 用户在主搜索框输入关键词（如 "transformer attention"）
-  2. 点击搜索 → 后端在线抓取论文 → 生成向量 → 训练主题模型
-  3. 搜索完成后展示三个标签页：主题地图 / 研究趋势 / AI 对话
+Flow:
+  1. User enters keywords in the search box
+  2. Click Search → backend fetches papers → embeds → trains topic model
+  3. Results displayed in three tabs: Topic Distribution / Trends / AI Chat
 """
 import streamlit as st
 import requests
@@ -18,7 +18,7 @@ import plotly.express as px
 API_BASE_URL = "http://127.0.0.1:8000"
 
 st.set_page_config(
-    page_title="AI 论文助手",
+    page_title="AI Research Assistant",
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -78,9 +78,11 @@ st.markdown("""
 
 # ========== 工具函数 ==========
 
+@st.cache_data(ttl=8, show_spinner=False)
 def check_api_health() -> bool:
+    """Health check, cached 8 s to avoid hammering the API on every rerun."""
     try:
-        r = requests.get(f"{API_BASE_URL}/health", timeout=5)
+        r = requests.get(f"{API_BASE_URL}/health", timeout=3)
         return r.status_code == 200
     except Exception:
         return False
@@ -92,24 +94,24 @@ def api_get(path: str, params: dict = None, timeout: int = 30):
         if r.status_code == 200:
             return r.json()
         elif r.status_code == 503:
-            return None  # 无数据，静默处理
+            return None  # no data yet, silent
         else:
-            st.error(f"API 错误 {r.status_code}: {r.text[:200]}")
+            st.error(f"API error {r.status_code}: {r.text[:200]}")
             return None
     except requests.exceptions.ConnectionError:
-        st.error("❌ 无法连接到后端服务，请先启动: `cd src && python main.py`")
+        st.error("❌ Cannot reach backend. Start it with: `cd src && python main.py`")
         return None
     except requests.exceptions.Timeout:
-        st.error("⏱️ 请求超时，请稍后重试")
+        st.error("⏱️ Request timed out, please try again")
         return None
     except Exception as e:
-        st.error(f"请求失败: {e}")
+        st.error(f"Request failed: {e}")
         return None
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=10, show_spinner=False)
 def cached_api_get(path: str, params_str: str = "", timeout: int = 30):
-    """缓存版 API GET 请求，避免 rerun 时重复调用"""
+    """Cached API GET — avoids duplicate calls on Streamlit rerun."""
     import json
     params = json.loads(params_str) if params_str else None
     try:
@@ -127,43 +129,41 @@ def api_post(path: str, payload: dict, timeout: int = 300):
         if r.status_code == 200:
             return r.json()
         elif r.status_code == 404:
-            st.error("会话已过期，请刷新页面重新开始")
+            st.error("Session expired — please refresh the page")
             return None
         elif r.status_code == 409:
-            st.warning("正在处理中，请稍候...")
+            st.warning("Processing in progress, please wait...")
             return None
         else:
-            st.error(f"请求失败: HTTP {r.status_code} — {r.text[:200]}")
+            st.error(f"Request failed: HTTP {r.status_code} — {r.text[:200]}")
             return None
     except requests.exceptions.Timeout:
-        st.error("请求超时（论文抓取可能需要较长时间，请稍后重试）")
+        st.error("Request timed out (paper fetching can take a while, please retry)")
         return None
     except Exception as e:
-        st.error(f"请求失败: {e}")
+        st.error(f"Request failed: {e}")
         return None
 
 
 def do_search(query: str, max_results: int, sources: list = None) -> bool:
-    """执行搜索流水线，返回是否成功"""
+    """Run the search pipeline; return True on success."""
     steps = [
-        "🌐 在线抓取论文...",
-        "💾 保存数据...",
-        "🔢 生成向量（embedding）...",
-        "🧠 训练主题模型（BERTopic）...",
-        "✅ 完成！",
+        "🌐 Fetching papers online...",
+        "💾 Saving data...",
+        "🔢 Generating embeddings...",
+        "🧠 Training topic model (BERTopic)...",
+        "✅ Done!",
     ]
 
-    progress_bar = st.progress(0, text="准备中...")
+    progress_bar = st.progress(0, text="Preparing...")
     status_text = st.empty()
 
-    # 显示步骤预览
     steps_placeholder = st.empty()
     steps_placeholder.markdown(
         " → ".join([f'<span class="step-wait">{s}</span>' for s in steps]),
         unsafe_allow_html=True
     )
 
-    # 更新第一步
     progress_bar.progress(10, text=steps[0])
     status_text.info(f"⏳ {steps[0]}")
 
@@ -178,20 +178,19 @@ def do_search(query: str, max_results: int, sources: list = None) -> bool:
     )
 
     if result:
-        progress_bar.progress(100, text="完成！")
+        progress_bar.progress(100, text="Done!")
 
-        # 显示来源统计
         source_stats = result.get("source_stats")
         source_info = ""
         if source_stats:
-            parts = [f"{name}: {count}篇" for name, count in source_stats.items()]
-            source_info = f" | 来源: {', '.join(parts)}"
+            parts = [f"{name}: {count}" for name, count in source_stats.items()]
+            source_info = f" | Sources: {', '.join(parts)}"
             st.session_state["source_stats"] = source_stats
 
         status_text.success(
-            f"✅ {result.get('message', '搜索完成')} "
-            f"（{result.get('paper_count', 0)} 篇论文，"
-            f"{result.get('topic_count', 0)} 个主题{source_info}）"
+            f"✅ {result.get('message', 'Search complete')} "
+            f"({result.get('paper_count', 0)} papers, "
+            f"{result.get('topic_count', 0)} topics{source_info})"
         )
         steps_placeholder.empty()
         return True
@@ -202,11 +201,11 @@ def do_search(query: str, max_results: int, sources: list = None) -> bool:
         return False
 
 
-def init_chat_session() -> str | None:
+def init_chat_session(topic_id: int | None = None) -> str | None:
     try:
         r = requests.post(
             f"{API_BASE_URL}/api/chat/init",
-            json={"session_id": None, "topic_id": None},
+            json={"session_id": None, "topic_id": topic_id},
             timeout=30
         )
         if r.status_code == 200:
@@ -220,19 +219,18 @@ def init_chat_session() -> str | None:
 # ========== 侧边栏 ==========
 
 with st.sidebar:
-    st.title("📚 AI 论文助手")
+    st.title("📚 AI Research Assistant")
     st.markdown("---")
 
     api_online = check_api_health()
     if api_online:
-        st.success("🟢 后端服务在线")
+        st.success("🟢 Backend Online")
     else:
-        st.error("🔴 后端服务离线")
-        st.info("启动: `cd src && python main.py`")
+        st.error("🔴 Backend Offline")
+        st.info("Start: `cd src && python main.py`")
 
     st.markdown("---")
 
-    # 检查是否已有数据（使用缓存减少 rerun 延迟）
     status_data = cached_api_get("/api/search/status") if api_online else None
     has_data = status_data.get("has_data", False) if status_data else False
 
@@ -240,22 +238,21 @@ with st.sidebar:
         current_query = status_data.get("current_query", "")
         paper_count = status_data.get("paper_count", 0)
         topic_count = status_data.get("topic_count", 0)
-        st.success(f"📊 已有数据")
-        if current_query and current_query != "(历史数据)":
-            st.caption(f"关键词: `{current_query}`")
+        st.success("📊 Data Loaded")
+        if current_query and current_query != "(historical data)":
+            st.caption(f"Query: `{current_query}`")
         if paper_count:
-            st.caption(f"论文: {paper_count} 篇 | 主题: {topic_count} 个")
+            st.caption(f"Papers: {paper_count} | Topics: {topic_count}")
 
-        # 显示各来源论文统计（使用缓存）
         if api_online:
             source_stats_data = cached_api_get("/api/search/source-stats")
             if source_stats_data and source_stats_data.get("source_stats"):
                 stats = source_stats_data["source_stats"]
                 if stats:
-                    source_parts = [f"{name}: {count}篇" for name, count in stats.items()]
-                    st.caption(f"📡 来源: {' | '.join(source_parts)}")
+                    source_parts = [f"{name}: {count}" for name, count in stats.items()]
+                    st.caption(f"📡 Sources: {' | '.join(source_parts)}")
 
-        if st.button("🔄 重新搜索", use_container_width=True):
+        if st.button("🔄 New Search", use_container_width=True):
             st.session_state.pop("search_done", None)
             st.session_state.pop("session_id", None)
             st.session_state.pop("messages", None)
@@ -263,15 +260,77 @@ with st.sidebar:
             st.session_state.pop("trend_data", None)
             st.rerun()
     else:
-        st.info("💡 请在搜索框中输入关键词开始")
+        st.info("💡 Enter keywords in the search box to begin")
+
+    # ========== Search History ==========
+    st.markdown("---")
+    st.markdown("### 📂 Search History")
+
+    if api_online:
+        history_data = cached_api_get("/api/history")
+        datasets = history_data.get("datasets", []) if history_data else []
+
+        if datasets:
+            options_map = {}
+            for ds in datasets:
+                label = (
+                    f"{ds['query']}"
+                    f"  ({ds['paper_count']} papers · {ds['topic_count']} topics"
+                    f" · {ds['modified_str'][5:]})"
+                )
+                options_map[label] = ds["safe_query"]
+
+            option_labels = list(options_map.keys())
+
+            current_safe = (
+                current_query.replace(" ", "_")[:30]
+                if has_data and current_query and current_query != "(historical data)"
+                else None
+            )
+            default_idx = 0
+            if current_safe:
+                for i, sq in enumerate(options_map.values()):
+                    if sq == current_safe:
+                        default_idx = i
+                        break
+
+            selected_label = st.selectbox(
+                "Select dataset",
+                options=option_labels,
+                index=default_idx,
+                key="history_selector",
+                label_visibility="collapsed",
+                help="Select a dataset then click Switch",
+            )
+
+            selected_safe_query = options_map[selected_label]
+
+            if st.button("📂 Switch to This Dataset", use_container_width=True, key="btn_switch_history"):
+                with st.spinner("Switching..."):
+                    result = api_post(
+                        "/api/history/switch",
+                        {"safe_query": selected_safe_query},
+                        timeout=15,
+                    )
+                if result:
+                    st.success(result.get("message", "Switched successfully"))
+                    for key in ["session_id", "messages", "sunburst_data", "trend_data"]:
+                        st.session_state.pop(key, None)
+                    st.session_state["search_done"] = True
+                    st.session_state["current_query"] = ds["query"]
+                    cached_api_get.clear()
+                    time.sleep(0.5)
+                    st.rerun()
+        else:
+            st.caption("No history yet")
 
     st.markdown("---")
-    st.markdown("### 📖 使用说明")
+    st.markdown("### 📖 How to Use")
     st.markdown("""
-1. 在搜索框输入研究关键词
-2. 等待系统在线抓取并处理
-3. 探索主题地图和趋势分析
-4. 与 AI 对话深入了解
+1. Enter a research keyword in the search box
+2. Wait for the system to fetch and process papers
+3. Explore topic distribution and trend analysis
+4. Chat with AI for deeper insights
     """)
 
     st.markdown("---")
@@ -280,33 +339,31 @@ with st.sidebar:
 
 # ========== 主界面 ==========
 
-st.markdown('<div class="main-header">📚 AI 科研文献助手</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">输入研究关键词，系统自动在线抓取论文并分析</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">📚 AI Research Assistant</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Enter research keywords and the system will fetch and analyze papers automatically</div>', unsafe_allow_html=True)
 
 # ========== 搜索区域（始终显示在顶部）==========
 
 search_col, btn_col = st.columns([5, 1])
 with search_col:
     query_input = st.text_input(
-        "搜索关键词",
-        placeholder="例如: transformer attention mechanism / large language model / BERT",
+        "Search keywords",
+        placeholder="e.g. transformer attention mechanism / large language model / BERT",
         label_visibility="collapsed",
         key="query_input"
     )
 with btn_col:
     max_results = st.session_state.get("max_results", 50)
-    search_btn = st.button("🔍 搜索", use_container_width=True, type="primary")
+    search_btn = st.button("🔍 Search", use_container_width=True, type="primary")
 
-# 高级选项（折叠）
-with st.expander("⚙️ 高级选项"):
-    max_results = st.slider("抓取论文数量", min_value=10, max_value=200, value=50, step=10,
-                            help="数量越多，主题分析越准确，但耗时也越长")
+with st.expander("⚙️ Advanced Options"):
+    max_results = st.slider("Max papers to fetch", min_value=10, max_value=200, value=50, step=10,
+                            help="More papers improve topic quality but take longer")
     st.session_state["max_results"] = max_results
 
-    # 数据源选择
-    st.markdown("**数据源选择**")
-    use_arxiv = st.checkbox("arXiv", value=True, key="use_arxiv", help="arXiv 预印本数据库")
-    use_openalex = st.checkbox("OpenAlex", value=False, key="use_openalex", help="OpenAlex 开放学术数据库")
+    st.markdown("**Data Sources**")
+    use_arxiv = st.checkbox("arXiv", value=True, key="use_arxiv", help="arXiv preprint repository")
+    use_openalex = st.checkbox("OpenAlex", value=False, key="use_openalex", help="OpenAlex open academic database")
     selected_sources = []
     if use_arxiv:
         selected_sources.append("arxiv")
@@ -321,7 +378,7 @@ if search_btn and query_input.strip():
     with st.container():
         st.markdown("---")
         sources = st.session_state.get("selected_sources", ["arxiv"])
-        st.markdown(f"**正在搜索**: `{query_input.strip()}` | 数据源: {', '.join(sources)}")
+        st.markdown(f"**Searching**: `{query_input.strip()}` | Sources: {', '.join(sources)}")
         success = do_search(query_input.strip(), max_results, sources=sources)
         if success:
             st.session_state["search_done"] = True
@@ -336,45 +393,47 @@ if search_btn and query_input.strip():
             time.sleep(1)
             st.rerun()
 elif search_btn and not query_input.strip():
-    st.warning("请输入搜索关键词")
+    st.warning("Please enter a search keyword")
 
 # ========== 数据展示区域（搜索完成后显示）==========
 
-search_done = st.session_state.get("search_done", False) or has_data
+search_done = st.session_state.get("search_done", False)
 
 if not search_done:
-    # 未搜索时显示引导界面
     st.markdown("---")
-    st.markdown(
-        '<div class="search-hint">👆 在上方输入关键词，系统将自动从 arXiv 在线抓取论文并分析</div>',
-        unsafe_allow_html=True
-    )
+    if has_data:
+        st.info("💡 Local data detected — select a dataset in the sidebar and click Switch, or search for new keywords.")
+    else:
+        st.markdown(
+            '<div class="search-hint">👆 Enter keywords above to fetch and analyze papers from arXiv</div>',
+            unsafe_allow_html=True
+        )
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.markdown("### 📊 主题地图")
-        st.markdown("搜索后自动生成 Sunburst 旭日图，展示各研究主题的论文分布")
+        st.markdown("### 📊 Topic Distribution")
+        st.markdown("Automatically generates a topic distribution chart showing paper counts per research direction")
     with col2:
-        st.markdown("### 📈 研究趋势")
-        st.markdown("折线图展示各主题在不同年份的热度变化，识别新兴方向")
+        st.markdown("### 📈 Research Trends")
+        st.markdown("Line chart showing paper counts per topic over the years to identify emerging directions")
     with col3:
-        st.markdown("### 💬 AI 对话")
-        st.markdown("基于 RAG 的语义问答，每个回答都有论文来源支撑")
+        st.markdown("### 💬 AI Chat")
+        st.markdown("RAG-powered Q&A — every answer is backed by cited paper sources")
 
 else:
     # 搜索完成后显示三个标签页
     st.markdown("---")
     tab_map, tab_trend, tab_chat = st.tabs([
-        "📊 主题地图",
-        "📈 研究趋势",
-        "💬 AI 对话",
+        "📊 Topic Distribution",
+        "📈 Research Trends",
+        "💬 AI Chat",
     ])
 
     # ============================================================
-    # 标签页 1：主题地图
+    # 标签页 1：主题分布
     # ============================================================
     with tab_map:
-        st.subheader("📊 研究主题地图")
-        st.caption("旭日图展示各研究主题的论文分布。选择主题可查看该主题下的论文列表。")
+        st.subheader("📊 Research Topic Distribution")
+        st.caption("Bar chart showing paper counts per research topic. Select a topic below to browse papers.")
 
         col_chart, col_papers = st.columns([3, 2])
 
@@ -387,18 +446,30 @@ else:
                 st.session_state.topic_options_list = []
                 st.session_state.topic_options_map = {}
 
-            load_btn = st.button("🔄 加载主题地图", key="load_sunburst", use_container_width=True)
+            load_btn = st.button("🔄 Load Topic Distribution", key="load_sunburst", use_container_width=True)
+
+            # 校验缓存数据有效性（父节点引用必须在 ids 中）
+            _cached = st.session_state.sunburst_data
+            if _cached:
+                _ids_set = set(_cached.get("ids", []))
+                _bad = any(
+                    p != "" and p not in _ids_set
+                    for p in _cached.get("parents", [])
+                )
+                if _bad:
+                    st.session_state.sunburst_data = None
 
             # 自动加载或手动加载
             if load_btn or st.session_state.sunburst_data is None:
-                with st.spinner("正在加载主题数据..."):
+                with st.spinner("Loading topic data..."):
                     data = api_get("/api/topics/sunburst")
                     if data:
                         st.session_state.sunburst_data = data
-                        # 预计算主题选项，避免每次 rerun 重新构建
+                        # 预计算主题选项：只保留叶子主题（topic_id >= 0），
+                        # 排除根节点（-1）和内部聚类节点（-2）
                         opts = {}
                         for label, tid in zip(data["labels"][1:], data["topic_ids"][1:]):
-                            if tid != -1:
+                            if tid >= 0:  # 只取真实叶子主题
                                 key = f"Topic {tid}: {label.split(': ', 1)[-1] if ': ' in label else label}"
                                 opts[key] = tid
                         st.session_state.topic_options_list = list(opts.keys())
@@ -411,37 +482,45 @@ else:
                 topic_labels = data["labels"][1:]
                 topic_values = data["values"][1:]
                 total_papers = sum(topic_values)
-                st.caption(f"已加载 {len(topic_labels)} 个主题，{total_papers} 篇论文")
+                st.caption(f"Loaded {len(topic_labels)} topics, {total_papers} papers")
 
-                # 保存主题数量到 session_state（供趋势分析使用）
-                st.session_state["actual_topic_count"] = len(topic_labels)
+                # Only count real leaf topics (topic_id >= 0); exclude root (-1) and
+                # internal BERTopic cluster nodes (-2) so the Trends slider max is accurate.
+                leaf_count = sum(1 for tid in data["topic_ids"][1:] if tid >= 0)
+                st.session_state["actual_topic_count"] = leaf_count
 
-                # 使用水平柱状图展示主题分布
-                import pandas as pd
-                df_topics = pd.DataFrame({
-                    "主题": topic_labels,
-                    "论文数": topic_values
-                }).sort_values("论文数", ascending=True)
+                # ── 水平柱状图 ────────────────────────────────────────
+                # 只展示叶子主题（topic_id >= 0），过滤掉根节点和内部聚类节点
+                leaf_labels = [
+                    lbl for lbl, tid in zip(data["labels"][1:], data["topic_ids"][1:])
+                    if tid >= 0
+                ]
+                leaf_values = [
+                    v for v, tid in zip(data["values"][1:], data["topic_ids"][1:])
+                    if tid >= 0
+                ]
+
+                palette = px.colors.qualitative.Plotly
+                bar_colors = [palette[i % len(palette)] for i in range(len(leaf_labels))]
 
                 fig = go.Figure(go.Bar(
-                    x=df_topics["论文数"],
-                    y=df_topics["主题"],
-                    orientation='h',
-                    marker=dict(
-                        color=df_topics["论文数"],
-                        colorscale="Blues",
-                    ),
-                    text=df_topics["论文数"],
-                    textposition="outside",
+                    x=leaf_values,
+                    y=leaf_labels,
+                    orientation="h",
+                    marker=dict(color=bar_colors),
+                    hovertemplate="<b>%{y}</b><br>Papers: %{x}<extra></extra>",
                 ))
                 fig.update_layout(
-                    title="研究主题论文分布",
-                    xaxis_title="论文数量",
-                    yaxis_title="",
-                    height=max(300, len(topic_labels) * 50),
-                    margin=dict(t=40, l=10, r=40, b=30),
+                    title=dict(
+                        text="Research Topic Distribution",
+                        x=0.5, xanchor="center", font=dict(size=15)
+                    ),
+                    xaxis_title="Paper Count",
+                    yaxis=dict(autorange="reversed"),
+                    height=max(300, len(leaf_labels) * 50 + 80),
+                    margin=dict(t=50, l=10, r=20, b=40),
                     paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(248,249,250,1)",
+                    plot_bgcolor="rgba(0,0,0,0)",
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -450,17 +529,16 @@ else:
                 topic_options_map = st.session_state.topic_options_map
 
                 if topic_options_list:
-                    st.markdown("**🔍 选择主题查看论文**")
+                    st.markdown("**🔍 Select a Topic**")
 
                     def on_topic_change():
-                        """selectbox 值变化时的回调，直接更新 session_state"""
                         sel = st.session_state.topic_selector
                         if sel and sel in st.session_state.topic_options_map:
                             st.session_state.selected_topic_id = st.session_state.topic_options_map[sel]
                             st.session_state.selected_topic_name = sel
 
                     st.selectbox(
-                        "选择主题",
+                        "Select topic",
                         options=topic_options_list,
                         key="topic_selector",
                         label_visibility="collapsed",
@@ -473,27 +551,40 @@ else:
                             st.session_state.selected_topic_id = topic_options_map[current_sel]
                             st.session_state.selected_topic_name = current_sel
             elif data:
-                st.info("主题数据为空，可能论文数量不足以形成主题。请尝试增加抓取数量后重新搜索。")
+                st.info("No topic data — there may not be enough papers. Try increasing the fetch count and searching again.")
 
         with col_papers:
-            st.markdown("### 📄 主题论文列表")
+            st.markdown("### 📄 Topic Papers")
 
             if st.session_state.get("selected_topic_id") is not None:
                 topic_id = st.session_state.selected_topic_id
                 topic_name = st.session_state.get("selected_topic_name", f"Topic {topic_id}")
 
-                st.markdown(f"**当前主题**: `{topic_name}`")
+                st.markdown(f"**Current Topic**: `{topic_name}`")
+
+                # 初始化页码 session state（只设置一次，避免与 widget value= 参数冲突）
+                if "paper_page" not in st.session_state:
+                    st.session_state["paper_page"] = 1
 
                 sort_col, page_col = st.columns(2)
                 with sort_col:
+                    def _on_sort_change():
+                        st.session_state["paper_page"] = 1
+
                     sort_by = st.selectbox(
-                        "排序方式",
-                        options=["date", "relevance"],
-                        format_func=lambda x: "📅 时间降序" if x == "date" else "🎯 相关性",
-                        key="paper_sort"
+                        "Sort by",
+                        options=["relevance", "date"],
+                        format_func=lambda x: (
+                            "🎯 Topic Relevance"
+                            if x == "relevance"
+                            else "📅 Date (Newest)"
+                        ),
+                        key="paper_sort",
+                        on_change=_on_sort_change,
+                        help="Topic Relevance = cosine similarity from paper embedding to topic centroid",
                     )
                 with page_col:
-                    page_num = st.number_input("页码", min_value=1, value=1, step=1, key="paper_page")
+                    page_num = st.number_input("Page", min_value=1, step=1, key="paper_page")
 
                 import json
                 papers_data = cached_api_get(
@@ -507,72 +598,102 @@ else:
                     page_size = papers_data.get("page_size", 10)
                     total_pages = max(1, (total + page_size - 1) // page_size)
 
-                    st.caption(f"共 {total} 篇论文 | 第 {page_num}/{total_pages} 页")
+                    st.caption(f"{total} papers | Page {page_num}/{total_pages}")
 
-                    for paper in papers:
+                    for rank_idx, paper in enumerate(papers, 1):
                         title = paper.get("title", "Unknown")
-                        with st.expander(f"📄 {title[:70]}{'...' if len(title) > 70 else ''}"):
+                        rel = paper.get("relevance")
+                        # 在折叠标题里加一个代表性徽章
+                        rel_badge = f"  🎯{rel:.2f}" if (sort_by == "relevance" and rel is not None) else ""
+                        with st.expander(
+                            f"📄 #{rank_idx} {title[:65]}{'...' if len(title) > 65 else ''}{rel_badge}"
+                        ):
                             authors = paper.get("authors", [])
                             published = paper.get("published", "")
                             abstract = paper.get("abstract", "")
                             pdf_url = paper.get("pdf_url", "")
+                            paper_id = paper.get("id", "")
 
                             st.markdown(f"**{title}**")
+                            meta_caps = []
                             if authors:
-                                st.caption(f"👤 {', '.join(authors[:3])}" + (" et al." if len(authors) > 3 else ""))
+                                meta_caps.append(
+                                    f"👤 {', '.join(authors[:3])}"
+                                    + (" et al." if len(authors) > 3 else "")
+                                )
                             if published:
-                                st.caption(f"📅 {published[:4]}")
+                                meta_caps.append(f"📅 {published[:4]}")
+                            if rel is not None:
+                                meta_caps.append(f"🎯 Relevance {rel:.3f}")
+                            if meta_caps:
+                                st.caption(" · ".join(meta_caps))
                             if abstract:
                                 st.markdown(f"> {abstract[:300]}{'...' if len(abstract) > 300 else ''}")
                             if pdf_url:
-                                st.markdown(f"[📥 下载 PDF]({pdf_url})")
+                                col_pdf1, col_pdf2 = st.columns(2)
+                                with col_pdf1:
+                                    st.markdown(f"[🔗 View Online]({pdf_url})")
+                                with col_pdf2:
+                                    if paper_id:
+                                        st.markdown(
+                                            f"[📥 Download]"
+                                            f"({API_BASE_URL}/api/papers/{paper_id}/pdf)"
+                                        )
 
-                    # 相关主题推荐
                     st.markdown("---")
-                    st.markdown("**🔗 相关主题推荐**")
+                    st.markdown("**🔗 Related Topics**")
                     similar_data = cached_api_get(
                         f"/api/topics/{topic_id}/similar",
                         params_str=json.dumps({"top_n": 3})
                     )
                     if similar_data and similar_data.get("similar_topics"):
+                        method = similar_data.get("method", "cosine")
+                        method_tag = "🧭 Cosine" if method == "cosine" else "📝 Keyword"
+                        st.caption(f"Similarity method: {method_tag}")
                         for sim in similar_data["similar_topics"]:
                             sim_name = sim.get("topic_name", "Unknown")
                             sim_count = sim.get("paper_count", 0)
                             sim_score = sim.get("similarity", 0)
                             if st.button(
-                                f"→ {sim_name} ({sim_count}篇, 相似度:{sim_score:.2f})",
+                                f"→ {sim_name} ({sim_count} papers, sim: {sim_score:.2f})",
                                 key=f"sim_{sim['topic_id']}"
                             ):
                                 st.session_state.selected_topic_id = sim["topic_id"]
                                 st.session_state.selected_topic_name = sim_name
                                 st.rerun()
             else:
-                st.info("👈 请先加载主题地图，然后选择一个主题查看论文")
+                st.info("👈 Load the topic distribution first, then select a topic to view papers")
 
     # ============================================================
     # 标签页 2：研究趋势
     # ============================================================
     with tab_trend:
-        st.subheader("📈 研究趋势分析")
-        st.caption("展示各研究主题在不同年份的论文数量变化，帮助识别新兴和成熟研究方向。")
+        st.subheader("📈 Research Trend Analysis")
+        st.caption("Shows paper counts per topic over the years to identify emerging and mature research directions.")
 
-        # 根据实际主题数量动态设置 slider 上限
-        actual_topic_count = st.session_state.get("actual_topic_count", 20)
-        slider_max = max(3, actual_topic_count)  # 上限不超过实际主题数
-        slider_default = min(8, slider_max)  # 默认值不超过上限
+        # Prefer the leaf-topic count set when Topic Distribution is loaded;
+        # fall back to topic_count from /api/search/status (available as soon as
+        # search completes, even before the Topic Distribution tab is visited).
+        actual_topic_count = (
+            st.session_state.get("actual_topic_count")
+            or (status_data.get("topic_count") if status_data else None)
+            or 20
+        )
+        slider_max = max(3, actual_topic_count)
+        slider_default = min(8, slider_max)
 
         top_n_topics = st.slider(
-            "显示主题数量", min_value=1, max_value=slider_max, value=slider_default, step=1,
-            help=f"当前共有 {actual_topic_count} 个主题"
+            "Number of topics to show", min_value=1, max_value=slider_max, value=slider_default, step=1,
+            help=f"{actual_topic_count} topics available"
         )
 
-        load_trend_btn = st.button("🔄 加载趋势数据", key="load_trends")
+        load_trend_btn = st.button("🔄 Load Trend Data", key="load_trends")
 
         if "trend_data" not in st.session_state:
             st.session_state.trend_data = None
 
         if load_trend_btn:
-            with st.spinner("正在计算研究趋势..."):
+            with st.spinner("Computing research trends..."):
                 data = api_get("/api/topics/trends", params={"top_n": top_n_topics})
                 if data:
                     st.session_state.trend_data = data
@@ -585,10 +706,10 @@ else:
             trending = trend_data.get("trending", [])
 
             if not years or not topics_series:
-                st.info("暂无趋势数据。论文数量可能不足，请尝试增加抓取数量后重新搜索。")
+                st.info("No trend data available. There may not be enough papers — try increasing the fetch count.")
             else:
                 if trending:
-                    st.markdown("**🔥 近期增长最快的研究方向**")
+                    st.markdown("**🔥 Fastest Growing Research Areas**")
                     badges_html = ""
                     for item in trending[:5]:
                         name = item.get("name", "")
@@ -613,9 +734,9 @@ else:
                     ))
 
                 fig.update_layout(
-                    title="各研究主题论文数量年度变化",
-                    xaxis_title="年份",
-                    yaxis_title="论文数量",
+                    title="Annual Paper Count by Research Topic",
+                    xaxis_title="Year",
+                    yaxis_title="Paper Count",
                     legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
                     hovermode="x unified",
                     height=480,
@@ -625,34 +746,172 @@ else:
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                with st.expander("📋 查看原始数据表格"):
+                with st.expander("📋 View Raw Data Table"):
                     import pandas as pd
-                    table_data = {"年份": years}
+                    table_data = {"Year": years}
                     for series in topics_series:
                         table_data[series.get("name", "Unknown")[:25]] = series.get("counts", [])
-                    df_display = pd.DataFrame(table_data).set_index("年份")
+                    df_display = pd.DataFrame(table_data).set_index("Year")
                     st.dataframe(df_display, use_container_width=True)
         else:
-            st.info("点击「加载趋势数据」按钮开始分析。")
+            st.info('Click "Load Trend Data" to start analysis.')
 
     # ============================================================
     # 标签页 3：AI 对话
     # ============================================================
     with tab_chat:
-        st.subheader("💬 AI 文献问答")
-        st.caption("基于 RAG 的语义问答，每个回答都有论文来源支撑。")
+        # ---------- 头部：标题 + 模型徽章 ----------
+        head_col, badge_col = st.columns([5, 2])
+        with head_col:
+            st.subheader("💬 AI Literature Q&A")
+            st.caption("RAG-powered multi-turn chat: retrieve related papers → generate cited answers with LLM.")
+        with badge_col:
+            llm_status = cached_api_get("/api/chat/llm-status") or {}
+            rag_provider = llm_status.get("rag_provider", "local")
+            rag_model = llm_status.get("rag_model", "t5-small")
+            if rag_provider == "deepseek":
+                st.markdown(
+                    f"<div style='text-align:right;padding-top:0.3em'>"
+                    f"<span style='background:#10b981;color:white;padding:4px 10px;"
+                    f"border-radius:12px;font-size:0.8em'>🚀 {rag_model}</span></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f"<div style='text-align:right;padding-top:0.3em'>"
+                    f"<span style='background:#94a3b8;color:white;padding:4px 10px;"
+                    f"border-radius:12px;font-size:0.8em'>🔌 Local ({rag_model})</span></div>",
+                    unsafe_allow_html=True,
+                )
 
-        # 初始化会话
+        # ---------- 初始化会话 ----------
         if "session_id" not in st.session_state:
-            with st.spinner("正在初始化对话..."):
-                session_id = init_chat_session()
+            with st.spinner("Initializing chat session..."):
+                _tid = st.session_state.get("selected_topic_id")
+                session_id = init_chat_session(topic_id=_tid)
                 if session_id:
                     st.session_state.session_id = session_id
                     st.session_state.messages = []
                 else:
-                    st.warning("对话服务初始化失败，请确认搜索已完成。")
+                    st.warning("Chat initialization failed — please ensure a search has been completed.")
 
-        # 显示对话历史
+        # ---------- 工具栏：清空 / 新会话 / 历史信息 ----------
+        if "session_id" in st.session_state:
+            tool_col1, tool_col2, tool_col3 = st.columns([2, 2, 3])
+            with tool_col1:
+                if st.button("🗑️ Clear Chat", key="clear_chat", use_container_width=True,
+                             help="Delete all messages in the current session (session ID is kept)"):
+                    try:
+                        requests.delete(
+                            f"{API_BASE_URL}/api/chat/history",
+                            params={"session_id": st.session_state.session_id},
+                            timeout=10,
+                        )
+                    except Exception:
+                        pass
+                    st.session_state.messages = []
+                    st.rerun()
+            with tool_col2:
+                if st.button("🔄 New Session", key="new_chat", use_container_width=True,
+                             help="Create a new session ID and start a fresh conversation"):
+                    new_sid = init_chat_session()
+                    if new_sid:
+                        st.session_state.session_id = new_sid
+                        st.session_state.messages = []
+                        st.rerun()
+            with tool_col3:
+                msg_count = len(st.session_state.get("messages", []))
+                st.caption(
+                    f"`session: {st.session_state.session_id[:8]}…` · {msg_count} messages"
+                )
+
+        # ---------- 示例问题（仅在空会话显示） ----------
+        if "session_id" in st.session_state and not st.session_state.get("messages"):
+            current_query = st.session_state.get("current_query", "this topic")
+            example_questions = [
+                f"What are the main approaches in {current_query}?",
+                f"What are the key research directions in {current_query}?",
+                "Compare the methods in the top 3 papers",
+                "Which paper has the most novel contribution and why?",
+            ]
+            st.markdown("##### 💡 Try These Questions")
+            ex_cols = st.columns(2)
+            for i, q in enumerate(example_questions):
+                with ex_cols[i % 2]:
+                    if st.button(q, key=f"example_{i}", use_container_width=True):
+                        st.session_state["pending_prompt"] = q
+                        st.rerun()
+
+        # ---------- 历史消息渲染 ----------
+        import re as _re
+
+        def _filter_cited_sources(answer: str, sources: list) -> list:
+            """
+            根据答案中出现的 [N] 编号筛选实际被引用的来源。
+            - 没有任何 [N] 编号 → 返回空（隐藏来源面板）
+            - 否则只保留答案中实际出现的那几个编号对应的论文
+            """
+            if not sources or not answer:
+                return []
+            cited_nums = set()
+            for m in _re.finditer(r"\[(\d{1,2})\]", answer):
+                try:
+                    cited_nums.add(int(m.group(1)))
+                except ValueError:
+                    pass
+            if not cited_nums:
+                return []  # 答案里没有 [N] 引用 → 不展示
+            # 只保留 1..len(sources) 范围内被引用的
+            return [
+                s for i, s in enumerate(sources, 1) if i in cited_nums
+            ]
+
+        def _render_sources(sources: list, label_prefix: str = "📚 View") -> None:
+            if not sources:
+                return
+            with st.expander(f"{label_prefix} {len(sources)} cited paper(s)"):
+                for idx, src in enumerate(sources, 1):
+                    st.markdown(f"**[{idx}] {src.get('title', 'Unknown')}**")
+                    authors = src.get("authors", [])
+                    rel = src.get("relevance")
+                    meta_parts = []
+                    if authors:
+                        meta_parts.append(
+                            f"👤 {', '.join(authors[:2])}"
+                            + (" et al." if len(authors) > 2 else "")
+                        )
+                    if rel is not None:
+                        meta_parts.append(f"🎯 {rel:.3f}")
+                    if meta_parts:
+                        st.caption(" · ".join(meta_parts))
+                    if src.get("ai_summary"):
+                        st.markdown(f"> {src['ai_summary'][:280]}...")
+                    pdf_link = src.get("pdf_url")
+                    pid = src.get("id")
+                    if pdf_link or pid:
+                        link_parts = []
+                        if pdf_link:
+                            link_parts.append(f"[🔗 PDF]({pdf_link})")
+                        if pid:
+                            link_parts.append(
+                                f"[📥 Download]"
+                                f"({API_BASE_URL}/api/papers/{pid}/pdf)"
+                            )
+                        st.markdown(" · ".join(link_parts))
+                    st.markdown("---")
+
+        def _model_badge(model_used: str) -> None:
+            if model_used == "deepseek":
+                st.caption(f"🚀 Generated by {rag_model}")
+            elif model_used == "deepseek_meta":
+                st.caption(f"💬 {rag_model} · Conversational mode (no retrieval)")
+            elif model_used == "deepseek_history":
+                st.caption(f"📜 {rag_model} · Follow-up answer based on history (no new retrieval)")
+            elif model_used == "local":
+                st.caption("🔌 Generated by local model")
+            elif model_used == "local_meta":
+                st.caption("💬 Local conversational mode (no LLM)")
+
         if "messages" in st.session_state:
             for msg in st.session_state.messages:
                 if msg["role"] == "user":
@@ -661,81 +920,77 @@ else:
                 else:
                     with st.chat_message("assistant"):
                         content = msg["content"]
-                        st.markdown(content.get("answer", "无回答"))
-                        sources = content.get("sources", [])
-                        if sources:
-                            with st.expander(f"📚 查看 {len(sources)} 篇参考论文"):
-                                for src in sources[:5]:
-                                    st.markdown(f"**{src.get('title', 'Unknown')}**")
-                                    if src.get("ai_summary"):
-                                        st.markdown(f"> {src['ai_summary'][:150]}...")
-                                    if src.get("pdf_url"):
-                                        st.markdown(f"[PDF]({src['pdf_url']})")
-                                    st.markdown("---")
+                        used = content.get("model_used", "local")
+                        _model_badge(used)
+                        ans = content.get("answer", "No answer")
+                        ts = content.get("topic_scope")
+                        if ts:
+                            st.caption(f"🎯 Search scope: {ts}")
+                        rq = content.get("rewritten_query")
+                        if rq:
+                            st.caption(f"🔄 Query rewritten to: `{rq}`")
+                        st.markdown(ans)
+                        # 元问题 / 历史承上 / 本地 meta 不显示来源；其它按 [N] 筛选
+                        if used not in ("deepseek_meta", "local_meta", "deepseek_history", "none"):
+                            cited = _filter_cited_sources(ans, content.get("sources", []))
+                            _render_sources(cited)
 
-        # 输入框
+        # ---------- 输入框 + 处理 ----------
         if "session_id" in st.session_state:
-            if prompt := st.chat_input("输入你的问题（支持中英文）..."):
-                with st.chat_message("user"):
-                    st.write(prompt)
+            user_prompt = st.chat_input("Ask a question (follow-up supported)...")
+            # 支持示例按钮触发
+            pending = st.session_state.pop("pending_prompt", None)
+            prompt = user_prompt or pending
+
+            if prompt:
+                # 立即把 user 消息加入历史并重绘，让用户立刻看到自己的提问
                 st.session_state.messages.append({"role": "user", "content": prompt})
+                # 标记"正在等待回复"，触发后续处理
+                st.session_state["_pending_query"] = prompt
+                st.rerun()
 
+            # 处理等待中的请求（在 user 消息之后渲染，再触发一次 rerun 把 assistant 消息收编）
+            pending_q = st.session_state.pop("_pending_query", None)
+            if pending_q:
                 with st.chat_message("assistant"):
-                    progress_placeholder = st.empty()
                     status_placeholder = st.empty()
-
-                    progress_placeholder.progress(25, text="阶段 1/4: 理解问题...")
-                    status_placeholder.markdown("⏳ 正在检索相关论文...")
+                    status_placeholder.markdown("🔍 Retrieving papers → 🧠 Generating answer...")
 
                     result = None
                     try:
-                        progress_placeholder.progress(50, text="阶段 2/4: 检索文档...")
                         r = requests.post(
                             f"{API_BASE_URL}/api/chat/message",
-                            json={"session_id": st.session_state.session_id, "message": prompt},
-                            timeout=90
+                            json={
+                                "session_id": st.session_state.session_id,
+                                "message": pending_q,
+                            },
+                            timeout=180,
                         )
-                        progress_placeholder.progress(75, text="阶段 3/4: 生成回答...")
                         if r.status_code == 200:
                             result = r.json()
                         elif r.status_code == 404:
-                            status_placeholder.error("会话已过期，请刷新页面")
+                            status_placeholder.error("Session expired — click 🔄 New Session")
                         else:
-                            status_placeholder.error(f"请求失败: HTTP {r.status_code}")
+                            status_placeholder.error(
+                                f"Request failed: HTTP {r.status_code} — {r.text[:200]}"
+                            )
                     except requests.exceptions.Timeout:
-                        status_placeholder.error("请求超时，请稍后重试")
+                        status_placeholder.error("Request timed out (>180s), please try again")
                     except Exception as e:
-                        status_placeholder.error(f"请求失败: {e}")
+                        status_placeholder.error(f"Request failed: {e}")
 
-                    progress_placeholder.empty()
                     status_placeholder.empty()
 
                     if result:
-                        answer = result.get("answer", "无回答")
-                        sources = result.get("sources", [])
-                        st.markdown(answer)
-                        if sources:
-                            with st.expander(f"📚 查看 {len(sources)} 篇参考论文"):
-                                for src in sources[:5]:
-                                    st.markdown(f"**{src.get('title', 'Unknown')}**")
-                                    authors = src.get("authors", [])
-                                    if authors:
-                                        st.caption(f"👤 {', '.join(authors[:2])}")
-                                    if src.get("ai_summary"):
-                                        st.markdown(f"> {src['ai_summary'][:200]}...")
-                                    if src.get("pdf_url"):
-                                        st.markdown(f"[📥 PDF]({src['pdf_url']})")
-                                    st.markdown("---")
-                        st.session_state.messages.append({"role": "assistant", "content": result})
+                        st.session_state.messages.append(
+                            {"role": "assistant", "content": result}
+                        )
+                        # 重新渲染：所有消息按顺序排列，chat_input 自动落到底部
+                        st.rerun()
                     else:
-                        st.error("未能获取回答，请稍后重试")
-
-            if st.session_state.get("messages"):
-                if st.button("🗑️ 清空对话历史", key="clear_chat"):
-                    st.session_state.messages = []
-                    st.rerun()
+                        st.error("Failed to get a response, please try again")
         else:
-            st.info("请先完成搜索以初始化对话功能。")
+            st.info("Please complete a search first to enable the chat feature.")
 
 # ========== 底部 ==========
 st.markdown(
