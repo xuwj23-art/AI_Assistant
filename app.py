@@ -649,7 +649,7 @@ else:
                                         encoded_pid = urllib.parse.quote(paper_id, safe='')
                                         st.markdown(
                                             f"[📥 Download]"
-                                            f"({API_BASE_URL}/api/papers/{encoded_pid}/pdf)"
+                                            f"({API_BASE_URL}/api/papers/pdf?id={encoded_pid})"
                                         )
 
                     st.markdown("---")
@@ -908,7 +908,7 @@ else:
                             encoded_pid = urllib.parse.quote(pid, safe='')
                             link_parts.append(
                                 f"[📥 Download]"
-                                f"({API_BASE_URL}/api/papers/{encoded_pid}/pdf)"
+                                f"({API_BASE_URL}/api/papers/pdf?id={encoded_pid})"
                             )
                         st.markdown(" · ".join(link_parts))
                     st.markdown("---")

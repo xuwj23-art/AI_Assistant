@@ -86,6 +86,29 @@ def search_papers(
 
 
 @router.get(
+    "/papers/pdf",
+    summary="下载论文 PDF（推荐，支持含斜杠的 ID）",
+    description=(
+        "通过 query 参数 `id` 传入论文 ID 来下载 PDF，避免含斜杠 ID 的路由问题。\n\n"
+        "- `mode=download`（默认）：服务器端代理下载并缓存到本地，再以附件形式返回\n"
+        "- `mode=redirect`：直接 302 跳转到原始 PDF URL（适合不想代理的场景）\n"
+    ),
+    responses={
+        404: {"model": ErrorResponse, "description": "论文或 PDF 链接不存在"},
+        502: {"model": ErrorResponse, "description": "下载源失败"},
+    },
+)
+def download_paper_pdf_by_query(
+    id: str = Query(..., description="论文 ID（arxiv_id / openalex DOI / 完整 id）"),
+    mode: str = Query("download", pattern="^(download|redirect)$"),
+):
+    """
+    下载论文 PDF（通过 query 参数传 ID，解决含斜杠 ID 的路由 404 问题）。
+    """
+    return _do_download_pdf(paper_id=id, mode=mode)
+
+
+@router.get(
     "/papers/{paper_id}",
     response_model=PaperResponse,
     summary="获取单个论文",
@@ -123,9 +146,10 @@ def get_paper(
 
 @router.get(
     "/papers/{paper_id}/pdf",
-    summary="下载论文 PDF",
+    summary="下载论文 PDF（兼容旧格式，仅适合不含斜杠的 ID）",
     description=(
         "下载指定论文的 PDF 文件。\n\n"
+        "⚠️ 若论文 ID 含斜杠（如 OpenAlex DOI），请改用 `/api/papers/pdf?id=...` 端点。\n\n"
         "- `mode=download`（默认）：服务器端代理下载并缓存到本地，再以附件形式返回\n"
         "- `mode=redirect`：直接 302 跳转到原始 PDF URL（适合不想代理的场景）\n"
     ),
@@ -135,11 +159,18 @@ def get_paper(
     },
 )
 def download_paper_pdf(
-    paper_id: str = Path(..., description="论文 ID（arxiv_id / openalex_id / 完整 id）"),
+    paper_id: str = Path(..., description="论文 ID（arxiv_id / openalex_id / 完整 id，不含斜杠）"),
     mode: str = Query("download", pattern="^(download|redirect)$"),
 ):
     """
-    下载论文 PDF。
+    下载论文 PDF（路径参数版，仅适用于不含斜杠的 ID）。
+    """
+    return _do_download_pdf(paper_id=paper_id, mode=mode)
+
+
+def _do_download_pdf(paper_id: str, mode: str):
+    """
+    下载论文 PDF 的公共实现，被两个端点共用。
     """
     from ..downloader import get_pdf_downloader
     downloader = get_pdf_downloader()
