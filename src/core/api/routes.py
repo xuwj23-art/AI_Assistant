@@ -136,7 +136,7 @@ def get_paper(
 )
 def download_paper_pdf(
     paper_id: str = Path(..., description="论文 ID（arxiv_id / openalex_id / 完整 id）"),
-    mode: str = Query("download", regex="^(download|redirect)$"),
+    mode: str = Query("download", pattern="^(download|redirect)$"),
 ):
     """
     下载论文 PDF。

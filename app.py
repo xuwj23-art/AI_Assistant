@@ -9,6 +9,7 @@ Flow:
 import streamlit as st
 import requests
 import time
+import urllib.parse
 
 import plotly.graph_objects as go
 import plotly.express as px
@@ -238,6 +239,9 @@ with st.sidebar:
         current_query = status_data.get("current_query", "")
         paper_count = status_data.get("paper_count", 0)
         topic_count = status_data.get("topic_count", 0)
+        # Store total paper count in session state so the Topic Distribution
+        # tab can reference it when computing the noise/outlier count.
+        st.session_state["_total_paper_count"] = paper_count
         st.success("📊 Data Loaded")
         if current_query and current_query != "(historical data)":
             st.caption(f"Query: `{current_query}`")
@@ -478,15 +482,22 @@ else:
             # 显示已加载的数据（独立于加载逻辑）
             data = st.session_state.sunburst_data
             if data and data.get("labels") and len(data["labels"]) > 1:
-                # 提取主题数据（跳过根节点）
-                topic_labels = data["labels"][1:]
-                topic_values = data["values"][1:]
-                total_papers = sum(topic_values)
-                st.caption(f"Loaded {len(topic_labels)} topics, {total_papers} papers")
-
                 # Only count real leaf topics (topic_id >= 0); exclude root (-1) and
-                # internal BERTopic cluster nodes (-2) so the Trends slider max is accurate.
+                # internal BERTopic cluster nodes (-2) so counts and Trends slider are accurate.
                 leaf_count = sum(1 for tid in data["topic_ids"][1:] if tid >= 0)
+                leaf_papers = sum(
+                    v for v, tid in zip(data["values"][1:], data["topic_ids"][1:])
+                    if tid >= 0
+                )
+                total_fetched = st.session_state.get("_total_paper_count", 0)
+                noise_count = total_fetched - leaf_papers if total_fetched > leaf_papers else 0
+                if noise_count > 0:
+                    st.caption(
+                        f"Loaded {leaf_count} topics, {leaf_papers}/{total_fetched} papers"
+                        f" ({noise_count} outliers excluded by HDBSCAN)"
+                    )
+                else:
+                    st.caption(f"Loaded {leaf_count} topics, {leaf_papers} papers")
                 st.session_state["actual_topic_count"] = leaf_count
 
                 # ── 水平柱状图 ────────────────────────────────────────
@@ -635,9 +646,10 @@ else:
                                     st.markdown(f"[🔗 View Online]({pdf_url})")
                                 with col_pdf2:
                                     if paper_id:
+                                        encoded_pid = urllib.parse.quote(paper_id, safe='')
                                         st.markdown(
                                             f"[📥 Download]"
-                                            f"({API_BASE_URL}/api/papers/{paper_id}/pdf)"
+                                            f"({API_BASE_URL}/api/papers/{encoded_pid}/pdf)"
                                         )
 
                     st.markdown("---")
@@ -893,9 +905,10 @@ else:
                         if pdf_link:
                             link_parts.append(f"[🔗 PDF]({pdf_link})")
                         if pid:
+                            encoded_pid = urllib.parse.quote(pid, safe='')
                             link_parts.append(
                                 f"[📥 Download]"
-                                f"({API_BASE_URL}/api/papers/{pid}/pdf)"
+                                f"({API_BASE_URL}/api/papers/{encoded_pid}/pdf)"
                             )
                         st.markdown(" · ".join(link_parts))
                     st.markdown("---")
